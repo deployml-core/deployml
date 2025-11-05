@@ -1,0 +1,18 @@
+name: my-mlflow-experiment
+provider:
+  name: gcp
+  project_id: mldeploy-468919
+  region: us-west2
+deployment:
+  type: cloud_run
+stack:
+  - experiment_tracking:
+      name: mlflow
+      params:
+        # Using the Docker image we built earlier
+        image: gcr.io/mldeploy-468919/mlflow:latest
+        service_name: mlflow-server-gcp
+  - artifact_tracking:
+      name: mlflow
+      params:
+        artifact_bucket: mlflow-artifacts-gcp-bucket
