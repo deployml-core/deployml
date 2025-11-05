@@ -22,3 +22,4 @@ mlflow.db
 *.csv
 *.house_data
 --source_format=PARQUET
+.venv/
