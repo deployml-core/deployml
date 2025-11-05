@@ -79,18 +79,27 @@ module "{{ stage_name }}_mlflow" {
   {% if flags.needs_postgres %}
   depends_on = [module.cloud_sql_postgres]
   {% endif %}
+  
+  {%- set image_specified = false -%}
   {% for key, value in tool.params.items() %}
     {%- set resource_params = ["cpu_limit", "memory_limit", "cpu_request", "memory_request", "max_scale", "container_concurrency"] -%}
     {% if key == "image" %}
+      {%- set image_specified = true -%}
       image = var.{{ stage_name }}_mlflow_image != "" ? var.{{ stage_name }}_mlflow_image : var.global_image
     {% elif key == "artifact_bucket" %}
       # Skip - already handled above
     {% elif key == "service_name" and stage_name in ["experiment_tracking", "model_serving", "feature_store"] %}
       # Skip - handled separately below
-    {% elif key not in resource_params and key != "create_artifact_bucket" and key != "backend_store_uri" and key != "use_postgres" %}
+    {% elif key not in resource_params and key != "create_artifact_bucket" and key != "backend_store_uri" and key != "use_postgres" and key != "allow_public_access" %}
       {{ key }} = var.{{ key }}
     {% endif %}
   {% endfor %}
+  
+  {% if not image_specified %}
+  # Use global image if not specified in params
+  image = var.global_image
+  {% endif %}
+  
   {% if stage_name in ["experiment_tracking", "model_serving"] %}
   service_name = var.{{ stage_name }}_mlflow_service_name
   {% endif %}

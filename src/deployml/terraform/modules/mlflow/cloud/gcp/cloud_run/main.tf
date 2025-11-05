@@ -87,7 +87,7 @@ resource "google_cloud_run_service" "mlflow" {
 
 # Make the service publicly accessible
 resource "google_cloud_run_service_iam_member" "public" {
-  count    = var.create_service && var.allow_public_access ? 1 : 0
+  count    = var.create_service && var.image != "" && var.service_name != "" && var.allow_public_access ? 1 : 0
   location = google_cloud_run_service.mlflow[0].location
   project  = google_cloud_run_service.mlflow[0].project
   service  = google_cloud_run_service.mlflow[0].name

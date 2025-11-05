@@ -46,11 +46,13 @@ mlflow_tracking_uri = {{ value }}
 {{ stage_name }}_{{ tool.name }}_image = "{{ value }}"
       {% elif key == "bucket_exists" %}
 bucket_exists = {{ value | lower }}
+      {% elif key == "create_bucket" %}
+create_bucket = {{ value | lower }}
       {% elif key == "artifact_bucket" %}
 artifact_bucket = "{{ tool.params.get('artifact_bucket', '') }}"
       {% elif key == "bigquery_dataset" %}
 {{ stage_name }}_{{ key }} = "{{ value }}"
-      {% elif key not in ["cpu_limit", "memory_limit", "cpu_request", "memory_request", "max_scale", "container_concurrency", "artifact_bucket", "create_artifact_bucket", "backend_store_uri"] %}
+      {% elif key not in ["cpu_limit", "memory_limit", "cpu_request", "memory_request", "max_scale", "container_concurrency", "artifact_bucket", "create_artifact_bucket", "backend_store_uri", "allow_public_access", "create_bucket"] %}
 {{ key }} = "{{ value }}"
       {% endif %}
     {% endfor %}

@@ -65,7 +65,7 @@ module "{{ stage_name }}_wandb" {
       image = var.{{ stage_name }}_wandb_image != "" ? var.{{ stage_name }}_wandb_image : var.global_image
     {% elif key == "artifact_bucket" %}
       # Skip - already handled above
-    {% elif key not in resource_params and key != "create_artifact_bucket" and key != "backend_store_uri" %}
+    {% elif key not in resource_params and key != "create_artifact_bucket" and key != "backend_store_uri" and key != "allow_public_access" %}
       {{ key }} = var.{{ key }}
     {% endif %}
   {% endfor %}
