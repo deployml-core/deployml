@@ -1,0 +1,46 @@
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --upgrade pip setuptools wheel
+
+# Install MLflow and dependencies
+RUN pip install \
+    mlflow[extras]==2.10.0 \
+    sqlalchemy \
+    google-cloud-storage \
+    boto3
+
+# Create mlflow user
+RUN useradd -m -s /bin/bash mlflow
+
+# Create directories with proper permissions
+RUN mkdir -p /app/mlflow-data /app/mlflow-config && \
+    chown -R mlflow:mlflow /app
+
+# Switch to mlflow user
+USER mlflow
+
+# Expose MLflow port
+EXPOSE 8080
+
+# Set environment variables
+ENV PORT=8080
+
+# Health check  
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Default command - deployml will set MLFLOW_DEFAULT_ARTIFACT_ROOT
+CMD mlflow server \
+    --host 0.0.0.0 \
+    --port ${PORT} \
+    --backend-store-uri /app/mlflow-data/mlflow.db \
+    --default-artifact-root ${MLFLOW_DEFAULT_ARTIFACT_ROOT:-/tmp/mlflow-artifacts}
