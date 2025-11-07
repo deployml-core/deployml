@@ -53,8 +53,8 @@ markdown_extensions:
   - pymdownx.snippets
   - pymdownx.superfences
 
-repo_name: codentell/deployml
-repo_url: https://github.com/codentell/deployml
+repo_name: deployml-core/deployml
+repo_url: https://github.com/deployml-core/deployml
 
 nav:
 - Getting Started: 
