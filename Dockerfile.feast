@@ -1,0 +1,14 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir feast==0.35.0 psycopg2-binary==2.9.9
+
+COPY feature_store/ /app/feature_store/
+
+WORKDIR /app/feature_store
+
+EXPOSE 6566
+
+CMD ["feast", "serve", "--host", "0.0.0.0", "--port", "6566"]
+
