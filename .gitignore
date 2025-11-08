@@ -22,3 +22,7 @@ mlflow.db
 *.csv
 *.house_data
 --source_format=PARQUET
+
+# Ignore .env file
+.venv/
+.env/
