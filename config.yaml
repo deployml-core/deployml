@@ -1,54 +1,41 @@
 name: gcp-mlops-stack
 provider:
   name: gcp
-  project_id: your-project-id  # UPDATE THIS
+  project_id: mldeploy-468919
   region: us-west2
-  zone: us-west2-a
-
-cost_analysis:
-  enabled: true
-  warning_threshold: 50.0
-  currency: "USD"
-  bucket_amount: 100
-  cloudsql_amount: 30
 
 deployment:
-  type: cloud_vm
+  type: cloud_run
 
 stack:
   - experiment_tracking:
       name: mlflow
       params:
+        image: gcr.io/mldeploy-468919/mlflow:latest
         service_name: mlflow-server
-        vm_name: mlops-vm
-        machine_type: e2-medium
-        disk_size_gb: 30
-        mlflow_port: 5000
-        allow_public_access: true
-        fastapi_port: 8000
-        fastapi_app_source: "template"
         
   - artifact_tracking:
       name: mlflow
       params:
-        artifact_bucket: mlflow-artifacts-bucket
-        create_artifact_bucket: true
+        image: gcr.io/mldeploy-468919/mlflow:latest
         
   - model_registry:
       name: mlflow
       params:
-        backend_store_uri: postgresql
+        image: gcr.io/mldeploy-468919/mlflow:latest
+        backend_store_uri: sqlite
+        
+  - model_serving:
+      name: fastapi
+      params:
+        image: gcr.io/mldeploy-468919/fastapi:latest
+        service_name: fastapi-server
         
   - feature_store:
       name: feast
       params:
+        image: gcr.io/mldeploy-468919/feast:latest
         service_name: feast-server
-        feast_port: 6566
-        backend_store_uri: postgresql
-        registry_type: sql
-        online_store_type: sqlite
-        offline_store_type: bigquery
-        bigquery_dataset: feast_offline_store
-        create_bigquery_dataset: true
-        project: house_sales
+        backend_store_uri: sqlite
+        offline_store: file
 
