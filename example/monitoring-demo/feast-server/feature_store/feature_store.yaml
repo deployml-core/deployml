@@ -1,0 +1,10 @@
+project: monitoring_demo
+registry: /tmp/feast_registry.db
+provider: local
+online_store:
+  type: sqlite
+  path: /tmp/online_store.db
+offline_store:
+  type: file
+entity_key_serialization_version: 2
+

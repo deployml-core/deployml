@@ -398,6 +398,9 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None):
     else:
         resource_msgs = default_msgs
 
+    # Log output to file for debugging
+    log_file = cwd / "terraform_apply.log"
+    
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -406,30 +409,46 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None):
         TimeElapsedColumn(),
     ) as progress:
         task = progress.add_task(resource_msgs[0], total=100)
-        process = subprocess.Popen(
-            cmd, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        start_time = time.time()
-        estimated_seconds = estimated_minutes * 60
-        n_msgs = len(resource_msgs)
-        while process.poll() is None:
-            elapsed = time.time() - start_time
-            # More conservative progress calculation - don't hit 95% too early
-            if elapsed < estimated_seconds:
-                progress_percent = int((elapsed / estimated_seconds) * 85)
-            else:
-                # If we exceed estimated time, slowly approach 95%
-                excess_time = elapsed - estimated_seconds
-                progress_percent = min(95, 85 + int(excess_time / 30))  # +1% per 30 seconds
+        
+        # Open log file and keep it open until process completes
+        f = open(log_file, "w")
+        try:
+            process = subprocess.Popen(
+                cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT
+            )
+            start_time = time.time()
+            estimated_seconds = estimated_minutes * 60
+            n_msgs = len(resource_msgs)
+            while process.poll() is None:
+                elapsed = time.time() - start_time
+                # More conservative progress calculation - don't hit 95% too early
+                if elapsed < estimated_seconds:
+                    progress_percent = int((elapsed / estimated_seconds) * 85)
+                else:
+                    # If we exceed estimated time, slowly approach 95%
+                    excess_time = elapsed - estimated_seconds
+                    progress_percent = min(95, 85 + int(excess_time / 30))  # +1% per 30 seconds
+                
+                # Choose message based on progress
+                msg_idx = min(
+                    int(progress_percent / (100 / (n_msgs - 1))), n_msgs - 2
+                )
+                message = resource_msgs[msg_idx]
+                progress.update(
+                    task, completed=progress_percent, description=message
+                )
+                time.sleep(1)
             
-            # Choose message based on progress
-            msg_idx = min(
-                int(progress_percent / (100 / (n_msgs - 1))), n_msgs - 2
-            )
-            message = resource_msgs[msg_idx]
-            progress.update(
-                task, completed=progress_percent, description=message
-            )
-            time.sleep(1)
-        progress.update(task, completed=100, description=resource_msgs[-1])
-        return process.returncode
+            # Wait for process to fully complete and flush all output
+            returncode = process.wait()
+            f.flush()  # Ensure all output is written
+            
+            # Only show 100% if returncode is 0 (success)
+            if returncode == 0:
+                progress.update(task, completed=100, description=resource_msgs[-1])
+            else:
+                progress.update(task, completed=progress_percent, description=f"⚠️ Terraform apply returned code {returncode}")
+            
+            return returncode
+        finally:
+            f.close()  # Always close the file
