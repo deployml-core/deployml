@@ -104,14 +104,20 @@ def train_model():
         
         # Log model with signature
         from mlflow.models.signature import infer_signature
+        import tempfile
+        import os as os_module
+        
         signature = infer_signature(X_train, y_pred_train)
         
-        mlflow.sklearn.log_model(
-            model,
-            "model",
-            signature=signature,
-            registered_model_name="house-price-model"
-        )
+        # Save model locally first, then log as artifact (avoids logged-models API issue)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model_path = os_module.path.join(tmp_dir, "model")
+            mlflow.sklearn.save_model(
+                model,
+                model_path,
+                signature=signature
+            )
+            mlflow.log_artifacts(model_path, artifact_path="model")
         
         # Log training statistics for drift detection
         training_stats = {
@@ -123,9 +129,34 @@ def train_model():
         mlflow.log_dict(training_stats, "training_statistics.json")
         
         run_id = mlflow.active_run().info.run_id
-        print(f"\n🎯 Model logged to MLflow!")
-        print(f"   Run ID: {run_id}")
-        print(f"   Model: house-price-model")
+        
+        # Register model using client API (more compatible)
+        try:
+            client = mlflow.MlflowClient()
+            model_uri = f"runs:/{run_id}/model"
+            model_details = client.create_registered_model("house-price-model")
+            client.create_model_version(
+                name="house-price-model",
+                source=model_uri,
+                run_id=run_id
+            )
+            print(f"\n🎯 Model logged and registered to MLflow!")
+            print(f"   Run ID: {run_id}")
+            print(f"   Registered Model: house-price-model")
+        except Exception as e:
+            if "RESOURCE_ALREADY_EXISTS" in str(e):
+                # Model already registered, just create new version
+                client.create_model_version(
+                    name="house-price-model",
+                    source=model_uri,
+                    run_id=run_id
+                )
+                print(f"\n🎯 Model logged and new version registered!")
+                print(f"   Run ID: {run_id}")
+                print(f"   Registered Model: house-price-model")
+            else:
+                print(f"\n⚠️  Model logged but registration failed: {e}")
+                print(f"   Run ID: {run_id}")
         
         return run_id
 
