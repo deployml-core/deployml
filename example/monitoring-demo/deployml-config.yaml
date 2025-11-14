@@ -49,7 +49,7 @@ stack:
         image: gcr.io/mldeploy-468919/grafana-server:latest
         service_name: grafana-dashboard
 
-  # Scheduled jobs for offline scoring and drift monitoring
+  # Scheduled jobs for offline scoring, drift, explainability, and fairness monitoring
   - workflow_orchestration:
       name: cron
       params:
@@ -64,5 +64,17 @@ stack:
           - service_name: drift-monitoring
             image: gcr.io/mldeploy-468919/drift-monitoring:latest
             cron_schedule: "0 6 * * *"  # Daily at 6 AM
+            bigquery_dataset: feast_monitoring
+          
+          # Explainability monitoring - runs daily
+          - service_name: explainability-monitoring
+            image: gcr.io/mldeploy-468919/explainability-monitor:latest
+            cron_schedule: "0 7 * * *"  # Daily at 7 AM
+            bigquery_dataset: feast_monitoring
+          
+          # Fairness monitoring - runs daily
+          - service_name: fairness-monitoring
+            image: gcr.io/mldeploy-468919/fairness-checker:latest
+            cron_schedule: "0 8 * * *"  # Daily at 8 AM
             bigquery_dataset: feast_monitoring
 
