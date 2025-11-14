@@ -62,6 +62,24 @@ cd ..
 echo "✅ Offline scoring image pushed"
 echo ""
 
+# Explainability Monitoring
+echo "📦 Building explainability monitor image (amd64)..."
+cd explainability-monitor
+docker build --platform linux/amd64 -t gcr.io/$PROJECT_ID/explainability-monitor:latest .
+docker push gcr.io/$PROJECT_ID/explainability-monitor:latest
+cd ..
+echo "✅ Explainability monitor image pushed"
+echo ""
+
+# Fairness Monitoring
+echo "📦 Building fairness checker image (amd64)..."
+cd fairness-checker
+docker build --platform linux/amd64 -t gcr.io/$PROJECT_ID/fairness-checker:latest .
+docker push gcr.io/$PROJECT_ID/fairness-checker:latest
+cd ..
+echo "✅ Fairness checker image pushed"
+echo ""
+
 echo "🎉 All amd64 images built and pushed successfully!"
 echo ""
 echo "Next steps:"
