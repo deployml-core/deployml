@@ -116,8 +116,8 @@ Create visualizations for:
 Create new tables in PostgreSQL:
 
 ```sql
--- Explainability logs
-CREATE TABLE explainability_logs (
+CREATE TABLE-- Explainability logs
+ explainability_logs (
     id SERIAL PRIMARY KEY,
     request_id VARCHAR(50) REFERENCES prediction_logs(request_id),
     timestamp TIMESTAMP DEFAULT NOW(),
