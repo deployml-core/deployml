@@ -72,12 +72,13 @@ resource "google_cloud_run_v2_job" "fairness_checker" {
 
 # Cloud Scheduler to trigger the fairness monitoring job
 resource "google_cloud_scheduler_job" "fairness_schedule" {
-  name        = "${var.stack_name}-fairness-checker-cron"
-  description = "Trigger fairness monitoring job"
-  schedule    = var.schedule
-  time_zone   = var.time_zone
-  region      = var.region
-  project     = var.project_id
+  name                = "${var.stack_name}-fairness-checker-cron"
+  description         = "Trigger fairness monitoring job"
+  schedule            = var.schedule
+  time_zone           = var.time_zone
+  region              = var.region
+  project             = var.project_id
+  deletion_protection = false
 
   http_target {
     http_method = "POST"

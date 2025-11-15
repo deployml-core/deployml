@@ -176,13 +176,14 @@ resource "google_cloud_run_v2_job" "scheduled_jobs" {
 resource "google_cloud_scheduler_job" "scheduled_cron_jobs" {
   for_each = { for job in var.jobs : job.service_name => job }
   
-  name        = "${each.value.service_name}-cron"
-  description = "Scheduled job for ${each.value.service_name}"
-  schedule    = each.value.cron_schedule
-  time_zone   = var.time_zone
-  region      = var.region
-  project     = var.project_id
-  depends_on  = [google_project_service.required]
+  name               = "${each.value.service_name}-cron"
+  description        = "Scheduled job for ${each.value.service_name}"
+  schedule           = each.value.cron_schedule
+  time_zone          = var.time_zone
+  region             = var.region
+  project            = var.project_id
+  deletion_protection = false
+  depends_on         = [google_project_service.required]
 
   http_target {
     uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${google_cloud_run_v2_job.scheduled_jobs[each.key].name}:run"

@@ -59,12 +59,13 @@ resource "google_cloud_run_v2_job" "explainability_monitor" {
 
 # Cloud Scheduler to trigger the explainability monitoring job
 resource "google_cloud_scheduler_job" "explainability_schedule" {
-  name        = "${var.stack_name}-explainability-monitor-cron"
-  description = "Trigger explainability monitoring job"
-  schedule    = var.schedule
-  time_zone   = var.time_zone
-  region      = var.region
-  project     = var.project_id
+  name                = "${var.stack_name}-explainability-monitor-cron"
+  description         = "Trigger explainability monitoring job"
+  schedule            = var.schedule
+  time_zone           = var.time_zone
+  region              = var.region
+  project             = var.project_id
+  deletion_protection = false
 
   http_target {
     http_method = "POST"

@@ -178,14 +178,15 @@ resource "google_project_iam_member" "cloudsql_client" {
 
 # Cloud Scheduler job for cron-based execution
 resource "google_cloud_scheduler_job" "offline_scoring_cron" {
-  count       = var.create_service && var.enable_cron ? 1 : 0
-  name        = "${var.service_name}-cron"
-  description = "Scheduled offline scoring job"
-  schedule    = var.cron_schedule
-  time_zone   = var.time_zone
-  region      = var.region
-  project     = var.project_id
-  depends_on  = [google_project_service.required]
+  count               = var.create_service && var.enable_cron ? 1 : 0
+  name                = "${var.service_name}-cron"
+  description         = "Scheduled offline scoring job"
+  schedule            = var.cron_schedule
+  time_zone           = var.time_zone
+  region              = var.region
+  project             = var.project_id
+  deletion_protection = false
+  depends_on          = [google_project_service.required]
 
   http_target {
     uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${google_cloud_run_v2_job.offline_scoring[0].name}:run"
