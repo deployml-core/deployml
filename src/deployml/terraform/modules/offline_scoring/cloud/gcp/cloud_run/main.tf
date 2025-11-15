@@ -11,11 +11,12 @@ data "google_project" "current" {}
 
 # Cloud Run Job for offline scoring
 resource "google_cloud_run_v2_job" "offline_scoring" {
-  count    = var.create_service && var.image != "" && var.service_name != "" ? 1 : 0
-  name     = var.service_name
-  location = var.region
-  project  = var.project_id
-  depends_on = [google_project_service.required]
+  count               = var.create_service && var.image != "" && var.service_name != "" ? 1 : 0
+  name                = var.service_name
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false
+  depends_on          = [google_project_service.required]
 
   template {
     task_count  = 1

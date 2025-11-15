@@ -14,10 +14,11 @@ data "google_project" "current" {}
 resource "google_cloud_run_v2_job" "scheduled_jobs" {
   for_each = { for job in var.jobs : job.service_name => job }
   
-  name     = each.value.service_name
-  location = var.region
-  project  = var.project_id
-  depends_on = [google_project_service.required]
+  name                = each.value.service_name
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false
+  depends_on          = [google_project_service.required]
 
   template {
     task_count  = 1

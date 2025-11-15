@@ -2,9 +2,10 @@
 # Runs on a schedule to detect bias and calculate fairness metrics
 
 resource "google_cloud_run_v2_job" "fairness_checker" {
-  name     = "${var.stack_name}-fairness-checker"
-  location = var.region
-  project  = var.project_id
+  name                = "${var.stack_name}-fairness-checker"
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false
 
   template {
     template {

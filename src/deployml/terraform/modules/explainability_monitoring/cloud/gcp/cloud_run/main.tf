@@ -2,9 +2,10 @@
 # Runs on a schedule to analyze SHAP values and track feature importance
 
 resource "google_cloud_run_v2_job" "explainability_monitor" {
-  name     = "${var.stack_name}-explainability-monitor"
-  location = var.region
-  project  = var.project_id
+  name                = "${var.stack_name}-explainability-monitor"
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false
 
   template {
     template {
