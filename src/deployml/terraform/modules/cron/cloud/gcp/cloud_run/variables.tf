@@ -119,8 +119,8 @@ variable "grafana_api_key" {
 }
 
 # Cloud SQL configuration
-variable "cloudsql_instance_connection_name" {
-  description = "Cloud SQL instance connection name for database access via Unix socket"
+variable "cloud_sql_connection_name" {
+  description = "Cloud SQL instance connection name (format: project:region:instance)"
   type        = string
   default     = ""
 }

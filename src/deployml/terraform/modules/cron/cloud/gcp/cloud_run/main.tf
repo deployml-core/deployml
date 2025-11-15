@@ -10,6 +10,14 @@ resource "google_project_service" "required" {
 
 data "google_project" "current" {}
 
+# Create a dedicated service account for Cloud Scheduler
+resource "google_service_account" "scheduler_sa" {
+  account_id   = "cloud-scheduler-sa"
+  display_name = "Cloud Scheduler Service Account"
+  project      = var.project_id
+  depends_on   = [google_project_service.required]
+}
+
 # Create Cloud Run Jobs for each job configuration
 resource "google_cloud_run_v2_job" "scheduled_jobs" {
   for_each = { for job in var.jobs : job.service_name => job }
@@ -28,8 +36,28 @@ resource "google_cloud_run_v2_job" "scheduled_jobs" {
       max_retries     = 3
       service_account = "${data.google_project.current.number}-compute@developer.gserviceaccount.com"
       
+      # Add Cloud SQL volume if connection name is provided
+      dynamic "volumes" {
+        for_each = var.cloud_sql_connection_name != "" ? [1] : []
+        content {
+          name = "cloudsql"
+          cloud_sql_instance {
+            instances = [var.cloud_sql_connection_name]
+          }
+        }
+      }
+      
       containers {
         image = each.value.image
+        
+        # Mount Cloud SQL socket if needed
+        dynamic "volume_mounts" {
+          for_each = var.cloud_sql_connection_name != "" ? [1] : []
+          content {
+            name       = "cloudsql"
+            mount_path = "/cloudsql"
+          }
+        }
         
         # Common environment variables
         env {
@@ -173,6 +201,28 @@ resource "google_cloud_run_v2_job" "scheduled_jobs" {
   }
 }
 
+# Grant Cloud Run Invoker permission to the scheduler service account for each job
+resource "google_cloud_run_v2_job_iam_member" "scheduler_invoker" {
+  for_each = { for job in var.jobs : job.service_name => job }
+  
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_job.scheduled_jobs[each.key].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler_sa.email}"
+}
+
+# Also grant invoker permission to the compute service account (for direct invocations)
+resource "google_cloud_run_v2_job_iam_member" "compute_invoker" {
+  for_each = { for job in var.jobs : job.service_name => job }
+  
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_job.scheduled_jobs[each.key].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
 # Create Cloud Scheduler jobs for each scheduled job
 resource "google_cloud_scheduler_job" "scheduled_cron_jobs" {
   for_each = { for job in var.jobs : job.service_name => job }
@@ -183,28 +233,38 @@ resource "google_cloud_scheduler_job" "scheduled_cron_jobs" {
   time_zone          = var.time_zone
   region             = var.region
   project            = var.project_id
-  depends_on         = [google_project_service.required]
+  
+  depends_on = [
+    google_project_service.required,
+    google_cloud_run_v2_job.scheduled_jobs,
+    google_cloud_run_v2_job_iam_member.scheduler_invoker
+  ]
 
   http_target {
     uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${google_cloud_run_v2_job.scheduled_jobs[each.key].name}:run"
     http_method = "POST"
     
     oauth_token {
-      service_account_email = "${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+      service_account_email = google_service_account.scheduler_sa.email
     }
     
-    # Add job-specific headers if needed
     headers = {
       "Content-Type" = "application/json"
     }
   }
 
   retry_config {
-    retry_count = 3
+    retry_count          = 3
+    max_retry_duration   = "600s"
+    min_backoff_duration = "5s"
+    max_backoff_duration = "3600s"
+    max_doublings        = 5
   }
 }
 
-# Grant required permissions for BigQuery access (offline scoring)
+# Grant required permissions to the compute service account
+
+# BigQuery permissions for offline scoring jobs
 resource "google_project_iam_member" "bigquery_data_viewer" {
   count   = length([for job in var.jobs : job if can(job.bigquery_dataset) && job.bigquery_dataset != ""]) > 0 ? 1 : 0
   project = var.project_id
@@ -227,8 +287,8 @@ resource "google_project_iam_member" "cloudsql_client" {
   member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
 }
 
-# Grant Cloud Scheduler permission to execute Cloud Run jobs
-resource "google_project_iam_member" "scheduler_job_runner" {
+# Grant Cloud Run Developer permission (for listing/describing jobs)
+resource "google_project_iam_member" "run_developer" {
   count   = length(var.jobs) > 0 ? 1 : 0
   project = var.project_id
   role    = "roles/run.developer"
@@ -248,4 +308,18 @@ resource "google_project_iam_member" "monitoring_metric_writer" {
   project = var.project_id
   role    = "roles/monitoring.metricWriter"
   member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+# Grant the scheduler service account the Cloud Scheduler Job Runner role
+resource "google_project_iam_member" "scheduler_job_runner" {
+  project = var.project_id
+  role    = "roles/cloudscheduler.jobRunner"
+  member  = "serviceAccount:${google_service_account.scheduler_sa.email}"
+}
+
+# Grant the scheduler service account permission to act as the compute service account
+resource "google_service_account_iam_member" "scheduler_act_as" {
+  service_account_id = "${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.scheduler_sa.email}"
 }
