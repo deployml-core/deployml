@@ -21,11 +21,10 @@ EXPOSE 8080
 # Start MLflow server
 # Environment variables will be injected by Cloud Run:
 # - PORT (Cloud Run sets this to 8080)
-# - BACKEND_STORE_URI (PostgreSQL connection string)
-# - DEFAULT_ARTIFACT_ROOT (GCS bucket path)
+# - MLFLOW_BACKEND_STORE_URI (PostgreSQL connection string)
+# - MLFLOW_DEFAULT_ARTIFACT_ROOT (GCS bucket path)
 CMD mlflow server \
     --host 0.0.0.0 \
     --port ${PORT:-8080} \
-    --backend-store-uri ${BACKEND_STORE_URI:-sqlite:///mlflow.db} \
-    --default-artifact-root ${DEFAULT_ARTIFACT_ROOT:-./mlruns}
-
+    --backend-store-uri ${MLFLOW_BACKEND_STORE_URI:-sqlite:///mlflow.db} \
+    --default-artifact-root ${MLFLOW_DEFAULT_ARTIFACT_ROOT:-./mlruns}
