@@ -17,6 +17,15 @@ cd ..
 echo "✅ MLflow server image pushed"
 echo ""
 
+# Feast Server
+echo "📦 Building Feast server image..."
+cd feast-server
+docker build --platform linux/amd64 -t gcr.io/$PROJECT_ID/feast-server:latest .
+docker push gcr.io/$PROJECT_ID/feast-server:latest
+cd ..
+echo "✅ Feast server image pushed"
+echo ""
+
 # Grafana Server
 echo "📦 Building Grafana server image..."
 cd grafana-server
