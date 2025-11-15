@@ -53,17 +53,20 @@ def load_model():
     try:
         mlflow_uri = os.getenv('MLFLOW_TRACKING_URI', 'http://localhost:5000')
         mlflow.set_tracking_uri(mlflow_uri)
+        logger.info(f"📡 Connecting to MLflow at: {mlflow_uri}")
         
-        model_name = "house-price-model"
-        model_uri = f"models:/{model_name}/latest"
+        model_name = os.getenv('MODEL_NAME', 'house-price-model')
+        model_stage = os.getenv('MODEL_STAGE', 'Production')
+        model_uri = f"models:/{model_name}/{model_stage}"
         
         logger.info(f"Loading model from {model_uri}...")
         model = mlflow.sklearn.load_model(model_uri)
-        logger.info(f"✅ Model loaded successfully")
-        return model, "latest"
+        logger.info(f"✅ Model loaded successfully from {model_stage} stage")
+        return model, model_stage
         
     except Exception as e:
-        logger.error(f"❌ Failed to load model: {e}")
+        logger.error(f"❌ Failed to load model from {model_uri}: {e}")
+        logger.error(f"   Make sure model '{model_name}' exists and is in '{model_stage}' stage")
         return None, None
 
 def score_batch(model, data):
