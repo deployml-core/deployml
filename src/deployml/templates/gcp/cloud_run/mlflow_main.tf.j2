@@ -226,7 +226,7 @@ module "{{ stage_name }}_{{ tool.name }}" {
   # Database and Feast configuration
   {% if flags.needs_postgres %}
   database_url = module.cloud_sql_postgres.metrics_connection_string_cloud_sql
-  cloudsql_instance_connection_name = module.cloud_sql_postgres.instance_connection_name
+  cloud_sql_connection_name = module.cloud_sql_postgres.instance_connection_name
   feast_online_store_host = module.cloud_sql_postgres.postgres_host
   feast_online_store_port = module.cloud_sql_postgres.postgres_port
   feast_online_store_database = module.cloud_sql_postgres.postgres_database
