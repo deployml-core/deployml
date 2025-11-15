@@ -1,4 +1,4 @@
-name: complete-ml-stack
+name: model-monitoring-demo-stack
 provider:
   name: gcp
   project_id: mldeploy-468919
