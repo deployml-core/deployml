@@ -41,7 +41,7 @@ async def load_model():
         mlflow.set_tracking_uri(mlflow_uri)
         
         # Load latest model
-        model = mlflow.sklearn.load_model("models:/house-price-model/latest")
+        model = mlflow.sklearn.load_model("models:/house-price-model/Production")
         model_version = "latest"
         print(f"✅ Model loaded successfully")
     except Exception as e:
@@ -55,6 +55,15 @@ async def home():
         "service": "House Price Prediction",
         "model_loaded": model is not None,
         "predictions_made": len(prediction_history)
+    }
+
+@app.get("/health")
+async def health():
+    """Health check endpoint for Cloud Run"""
+    return {
+        "status": "healthy",
+        "model_loaded": model is not None,
+        "model_version": model_version
     }
 
 @app.post("/predict")
