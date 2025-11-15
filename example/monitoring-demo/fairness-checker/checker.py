@@ -17,13 +17,32 @@ logger = logging.getLogger(__name__)
 
 # Configuration from environment
 DATABASE_URL = os.getenv("DATABASE_URL")
-SENSITIVE_ATTRIBUTES = json.loads(os.getenv("SENSITIVE_ATTRIBUTES", "[]"))
-FAIRNESS_METRICS = json.loads(os.getenv("FAIRNESS_METRICS", '["demographic_parity", "disparate_impact"]'))
+
+# Parse SENSITIVE_ATTRIBUTES with error handling
+try:
+    SENSITIVE_ATTRIBUTES = json.loads(os.getenv("SENSITIVE_ATTRIBUTES", "[]"))
+except (json.JSONDecodeError, TypeError) as e:
+    logger.warning(f"Invalid SENSITIVE_ATTRIBUTES format: {e}. Defaulting to empty list.")
+    SENSITIVE_ATTRIBUTES = []
+
+# Parse FAIRNESS_METRICS with error handling
+try:
+    FAIRNESS_METRICS = json.loads(os.getenv("FAIRNESS_METRICS", '["demographic_parity", "disparate_impact"]'))
+except (json.JSONDecodeError, TypeError) as e:
+    logger.warning(f"Invalid FAIRNESS_METRICS format: {e}. Using defaults.")
+    FAIRNESS_METRICS = ["demographic_parity", "disparate_impact"]
+
 DEMOGRAPHIC_PARITY_THRESHOLD = float(os.getenv("DEMOGRAPHIC_PARITY_THRESHOLD", "0.1"))
 DISPARATE_IMPACT_THRESHOLD = float(os.getenv("DISPARATE_IMPACT_THRESHOLD", "0.8"))
 ALERT_ON_VIOLATION = os.getenv("ALERT_ON_VIOLATION", "true").lower() == "true"
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "")
-PROTECTED_GROUPS = json.loads(os.getenv("PROTECTED_GROUPS", "null")) if os.getenv("PROTECTED_GROUPS") else None
+
+# Parse PROTECTED_GROUPS with error handling
+try:
+    PROTECTED_GROUPS = json.loads(os.getenv("PROTECTED_GROUPS", "null")) if os.getenv("PROTECTED_GROUPS") else None
+except (json.JSONDecodeError, TypeError) as e:
+    logger.warning(f"Invalid PROTECTED_GROUPS format: {e}. Defaulting to None.")
+    PROTECTED_GROUPS = None
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
