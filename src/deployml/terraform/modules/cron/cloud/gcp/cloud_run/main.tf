@@ -183,7 +183,6 @@ resource "google_cloud_scheduler_job" "scheduled_cron_jobs" {
   time_zone          = var.time_zone
   region             = var.region
   project            = var.project_id
-  deletion_protection = false
   depends_on         = [google_project_service.required]
 
   http_target {
