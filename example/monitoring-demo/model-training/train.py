@@ -74,7 +74,7 @@ def train():
         # Log to MLflow
         mlflow.log_param("n_estimators", 50)
         mlflow.log_metric("rmse", rmse)
-        mlflow.sklearn.log_model(model, "model")
+        mlflow.sklearn.log_model(model, "model", registered_model_name="house-price-model")
         
         # Register model
         try:
