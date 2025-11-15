@@ -1,0 +1,66 @@
+name: complete-ml-stack
+provider:
+  name: gcp
+  project_id: mldeploy-468919
+  region: us-west1
+
+deployment:
+  type: cloud_run
+
+stack:
+  # MLflow infrastructure
+  - experiment_tracking:
+      name: mlflow
+      params:
+        image: gcr.io/mldeploy-468919/mlflow-server:latest
+        service_name: mlflow-server
+
+  - artifact_tracking:
+      name: mlflow
+      params:
+        artifact_bucket: mlflow-artifacts-mldeploy-468919
+        create_artifact_bucket: true
+        
+  - model_registry:
+      name: mlflow
+      params:
+        backend_store_uri: postgresql  # Auto-creates Cloud SQL
+
+  # Serving
+  - model_serving:
+      name: fastapi
+      params:
+        image: gcr.io/mldeploy-468919/fastapi-serving:latest
+        service_name: house-price-api
+
+  # Monitoring
+  - model_monitoring:
+      name: grafana
+      params:
+        image: gcr.io/mldeploy-468919/grafana-server:latest
+        service_name: grafana-dashboard
+
+  # Jobs (auto-wired to MLflow and database)
+  - workflow_orchestration:
+      name: cron
+      params:
+        jobs:
+          - service_name: offline-scoring
+            image: gcr.io/mldeploy-468919/offline-scoring:latest
+            cron_schedule: "0 2 1,15 * *"
+            bigquery_dataset: feast_monitoring
+          
+          - service_name: drift-monitoring
+            image: gcr.io/mldeploy-468919/drift-monitoring:latest
+            cron_schedule: "0 6 * * *"
+            bigquery_dataset: feast_monitoring
+          
+          - service_name: explainability-monitoring
+            image: gcr.io/mldeploy-468919/explainability-monitor:latest
+            cron_schedule: "0 7 * * *"
+            bigquery_dataset: feast_monitoring
+          
+          - service_name: fairness-monitoring
+            image: gcr.io/mldeploy-468919/fairness-checker:latest
+            cron_schedule: "0 8 * * *"
+            bigquery_dataset: feast_monitoring
