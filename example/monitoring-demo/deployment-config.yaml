@@ -40,6 +40,15 @@ stack:
         image: gcr.io/mldeploy-468919/grafana-server:latest
         service_name: grafana-dashboard
 
+  # Feast feature store
+  - feature_store:
+      name: feast
+      params:
+        image: gcr.io/mldeploy-468919/feast-server:latest
+        service_name: feast-server
+        backend_store_uri: sqlite
+        offline_store: file
+
   # Jobs (auto-wired to MLflow and database)
   - workflow_orchestration:
       name: cron
