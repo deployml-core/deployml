@@ -1,165 +1,92 @@
 """
-Simple model training script for monitoring demo
-Trains a basic regression model and logs it to MLflow
+Simple script to train a model and save it to MLflow
 """
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error
 import mlflow
 import mlflow.sklearn
 import os
 
-# Simple synthetic house price data
-def create_sample_data(n_samples=1000):
-    """Create simple synthetic data"""
+def create_data():
+    """Create simple fake house data"""
     np.random.seed(42)
+    n = 1000
     
-    data = {
-        'bedrooms': np.random.randint(1, 6, n_samples),
-        'bathrooms': np.random.randint(1, 4, n_samples),
-        'sqft': np.random.randint(500, 5000, n_samples),
-        'age': np.random.randint(0, 50, n_samples),
-    }
+    data = pd.DataFrame({
+        'bedrooms': np.random.randint(1, 6, n),
+        'bathrooms': np.random.randint(1, 4, n),
+        'sqft': np.random.randint(500, 5000, n),
+        'age': np.random.randint(0, 50, n),
+    })
     
-    # Simple price formula with some noise
+    # Simple price formula
     data['price'] = (
         data['bedrooms'] * 50000 +
         data['bathrooms'] * 30000 +
-        data['sqft'] * 100 +
-        data['age'] * -2000 +
-        np.random.normal(0, 50000, n_samples)
+        data['sqft'] * 100 -
+        data['age'] * 2000 +
+        np.random.normal(0, 50000, n)  # Add some noise
     )
     
-    return pd.DataFrame(data)
+    return data
 
-def train_model():
-    """Train and register a simple model"""
+def train():
+    """Train and save model to MLflow"""
     
-    # Set MLflow tracking URI from environment variable
-    # This should point to your DEPLOYED MLflow server, e.g.:
-    # export MLFLOW_TRACKING_URI="https://mlflow-server-abc123-uw.a.run.app"
+    # Setup MLflow
     mlflow_uri = os.getenv('MLFLOW_TRACKING_URI', 'http://localhost:5000')
-    
-    if mlflow_uri == 'http://localhost:5000':
-        print("⚠️  WARNING: Using localhost MLflow. Set MLFLOW_TRACKING_URI to your deployed URL:")
-        print("   export MLFLOW_TRACKING_URI='https://your-mlflow-url.run.app'")
-    
     mlflow.set_tracking_uri(mlflow_uri)
-    print(f"📡 Connecting to MLflow at: {mlflow_uri}")
-    mlflow.set_experiment("house-price-prediction")
+    print(f"📡 Using MLflow at: {mlflow_uri}")
     
-    print(f"📊 Creating training data...")
-    df = create_sample_data(n_samples=1000)
+    # Create experiment
+    mlflow.set_experiment("house-prices")
     
+    # Get data
+    print("📊 Creating data...")
+    df = create_data()
+    
+    # Split features and target
     X = df[['bedrooms', 'bathrooms', 'sqft', 'age']]
     y = df['price']
     
+    # Train/test split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
     
-    print(f"🤖 Training model...")
-    with mlflow.start_run(run_name="simple-house-model"):
+    # Start MLflow run
+    with mlflow.start_run():
         
-        # Train simple random forest
-        model = RandomForestRegressor(
-            n_estimators=50,
-            max_depth=10,
-            random_state=42,
-            n_jobs=-1
-        )
-        
+        # Train model
+        print("🤖 Training model...")
+        model = RandomForestRegressor(n_estimators=50, random_state=42)
         model.fit(X_train, y_train)
         
-        # Make predictions
-        y_pred_train = model.predict(X_train)
-        y_pred_test = model.predict(X_test)
+        # Test model
+        predictions = model.predict(X_test)
+        rmse = np.sqrt(mean_squared_error(y_test, predictions))
         
-        # Calculate metrics
-        train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train))
-        test_rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
-        train_r2 = r2_score(y_train, y_pred_train)
-        test_r2 = r2_score(y_test, y_pred_test)
+        print(f"✅ Model trained! RMSE: ${rmse:,.0f}")
         
-        print(f"\n✅ Model Performance:")
-        print(f"   Train RMSE: ${train_rmse:,.2f}")
-        print(f"   Test RMSE:  ${test_rmse:,.2f}")
-        print(f"   Train R²:   {train_r2:.4f}")
-        print(f"   Test R²:    {test_r2:.4f}")
-        
-        # Log metrics
+        # Log to MLflow
         mlflow.log_param("n_estimators", 50)
-        mlflow.log_param("max_depth", 10)
-        mlflow.log_metric("train_rmse", train_rmse)
-        mlflow.log_metric("test_rmse", test_rmse)
-        mlflow.log_metric("train_r2", train_r2)
-        mlflow.log_metric("test_r2", test_r2)
+        mlflow.log_metric("rmse", rmse)
+        mlflow.sklearn.log_model(model, "model")
         
-        # Log feature importance for monitoring
-        feature_importance = dict(zip(X.columns, model.feature_importances_))
-        for feature, importance in feature_importance.items():
-            mlflow.log_metric(f"feature_importance_{feature}", importance)
-        
-        # Log model with signature
-        from mlflow.models.signature import infer_signature
-        import tempfile
-        import os as os_module
-        
-        signature = infer_signature(X_train, y_pred_train)
-        
-        # Save model locally first, then log as artifact (avoids logged-models API issue)
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            model_path = os_module.path.join(tmp_dir, "model")
-            mlflow.sklearn.save_model(
-                model,
-                model_path,
-                signature=signature
-            )
-            mlflow.log_artifacts(model_path, artifact_path="model")
-        
-        # Log training statistics for drift detection
-        training_stats = {
-            'mean': X_train.mean().to_dict(),
-            'std': X_train.std().to_dict(),
-            'min': X_train.min().to_dict(),
-            'max': X_train.max().to_dict(),
-        }
-        mlflow.log_dict(training_stats, "training_statistics.json")
-        
-        run_id = mlflow.active_run().info.run_id
-        
-        # Register model using client API (more compatible)
+        # Register model
         try:
-            client = mlflow.MlflowClient()
-            model_uri = f"runs:/{run_id}/model"
-            model_details = client.create_registered_model("house-price-model")
-            client.create_model_version(
-                name="house-price-model",
-                source=model_uri,
-                run_id=run_id
+            mlflow.register_model(
+                f"runs:/{mlflow.active_run().info.run_id}/model",
+                "house-price-model"
             )
-            print(f"\n🎯 Model logged and registered to MLflow!")
-            print(f"   Run ID: {run_id}")
-            print(f"   Registered Model: house-price-model")
-        except Exception as e:
-            if "RESOURCE_ALREADY_EXISTS" in str(e):
-                # Model already registered, just create new version
-                client.create_model_version(
-                    name="house-price-model",
-                    source=model_uri,
-                    run_id=run_id
-                )
-                print(f"\n🎯 Model logged and new version registered!")
-                print(f"   Run ID: {run_id}")
-                print(f"   Registered Model: house-price-model")
-            else:
-                print(f"\n⚠️  Model logged but registration failed: {e}")
-                print(f"   Run ID: {run_id}")
+            print("✅ Model registered as 'house-price-model'")
+        except:
+            print("⚠️  Model logged but not registered (might already exist)")
         
-        return run_id
+        print(f"🎯 Done! Check MLflow UI at {mlflow_uri}")
 
 if __name__ == "__main__":
-    train_model()
-
+    train()
