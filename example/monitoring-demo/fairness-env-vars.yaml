@@ -1,4 +1,4 @@
-DATABASE_URL: 'postgresql://mlflow:Ctda.zQ55WInAl0a@34.169.7.44:5432/metrics'
+DATABASE_URL: 'postgresql://username:password@localhost:5432/metrics'  # Set this as environment variable!
 SENSITIVE_ATTRIBUTES: '["buyer_age_group","location","first_time_buyer"]'
 FAIRNESS_METRICS: '["demographic_parity","disparate_impact"]'
 PROTECTED_GROUPS: '{"buyer_age_group":["55+"],"location":["rural"],"first_time_buyer":[true]}'

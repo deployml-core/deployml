@@ -3,8 +3,9 @@
 
 from sqlalchemy import create_engine, text
 import random
+import os
 
-DATABASE_URL = "postgresql://mlflow:Ctda.zQ55WInAl0a@34.169.7.44:5432/metrics"
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://username:password@localhost:5432/metrics")
 engine = create_engine(DATABASE_URL)
 
 # Sample values for sensitive attributes
