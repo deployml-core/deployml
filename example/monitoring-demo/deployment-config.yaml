@@ -25,7 +25,6 @@ stack:
       name: mlflow
       params:
         backend_store_uri: postgresql  # Auto-creates Cloud SQL
-        database_name: mlflow  # Explicitly set database name
 
   # Serving
   - model_serving:
@@ -54,7 +53,6 @@ stack:
   - workflow_orchestration:
       name: cron
       params:
-        database_name: mlflow
         jobs:
           - service_name: offline-scoring
             image: gcr.io/mldeploy-468919/offline-scoring:latest
