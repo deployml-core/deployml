@@ -117,3 +117,10 @@ variable "grafana_api_key" {
   default     = ""
   sensitive   = true
 }
+
+# Cloud SQL configuration
+variable "cloud_sql_connection_name" {
+  description = "Cloud SQL instance connection name (format: project:region:instance)"
+  type        = string
+  default     = ""
+}

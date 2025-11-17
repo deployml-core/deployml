@@ -23,7 +23,7 @@ variable "db_name" {
 variable "db_user" {
   type        = string
   description = "Database username"
-  default     = "mlflow"
+  default     = "postgres"
 }
 
 variable "db_tier" {
