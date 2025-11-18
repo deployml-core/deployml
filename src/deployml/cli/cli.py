@@ -39,10 +39,16 @@ from deployml.utils.infracost import (
     run_infracost_analysis,
     format_cost_for_confirmation,
 )
+from deployml.utils.teardown import (
+    save_deployment_metadata,
+    load_deployment_metadata,
+    calculate_cron_from_timestamp,
+)
 
 import re
 import time
 import json
+from datetime import datetime, timedelta
 
 cli = typer.Typer()
 
@@ -480,6 +486,19 @@ def deploy(
     name_material = f"{workspace_name}:{project_id}".encode("utf-8")
     name_hash = hashlib.sha1(name_material).hexdigest()[:6]
 
+    # Handle teardown configuration
+    teardown_config = config.get("teardown", {})
+    teardown_enabled = teardown_config.get("enabled", False)
+    teardown_cron_schedule = ""
+    teardown_scheduled_timestamp = 0
+    
+    if teardown_enabled:
+        duration_hours = teardown_config.get("duration_hours", 24)
+        deployed_at = datetime.utcnow()
+        teardown_at = deployed_at + timedelta(hours=duration_hours)
+        teardown_scheduled_timestamp = int(teardown_at.timestamp())
+        teardown_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
+
     # Render templates
     if deployment_type == "cloud_vm":
         main_tf = main_template.render(
@@ -493,6 +512,9 @@ def deploy(
             zone=config["provider"].get("zone", f"{region}-a"),
             stack_name=workspace_name,
             name_hash=name_hash,
+            teardown_config=teardown_config if teardown_enabled else None,
+            teardown_cron_schedule=teardown_cron_schedule,
+            teardown_scheduled_timestamp=teardown_scheduled_timestamp,
         )
     else:
         main_tf = main_template.render(
@@ -504,6 +526,9 @@ def deploy(
             project_id=project_id,
             stack_name=workspace_name,
             name_hash=name_hash,
+            teardown_config=teardown_config if teardown_enabled else None,
+            teardown_cron_schedule=teardown_cron_schedule,
+            teardown_scheduled_timestamp=teardown_scheduled_timestamp,
         )
     variables_tf = var_template.render(
         stack=stack,
@@ -652,6 +677,26 @@ def deploy(
         )
         if result_code == 0 or result_code == 1:
             typer.echo("✅ Deployment complete!")
+            
+            # Handle auto-teardown metadata
+            if teardown_enabled:
+                duration_hours = teardown_config.get("duration_hours", 24)
+                deployed_at = datetime.utcnow()
+                teardown_at = deployed_at + timedelta(hours=duration_hours)
+                
+                metadata = {
+                    "deployed_at": deployed_at.isoformat(),
+                    "teardown_scheduled_at": teardown_at.isoformat(),
+                    "teardown_enabled": True,
+                    "duration_hours": duration_hours,
+                    "scheduler_job_name": f"deployml-teardown-{workspace_name}"
+                }
+                save_deployment_metadata(DEPLOYML_DIR, metadata)
+                
+                typer.echo(f"\n⏰ Auto-teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                typer.echo(f"   (in {duration_hours} hours)")
+                typer.echo(f"   To cancel: deployml teardown cancel --config-path {config_path}")
+            
             # Show all Terraform outputs in a user-friendly way
             output_proc = subprocess.run(
                 ["terraform", "output", "-json"],
@@ -834,6 +879,103 @@ def status():
     Check the deployment status of the current workspace.
     """
     typer.echo("Checking deployment status...")
+
+
+@cli.command()
+def teardown(
+    action: str = typer.Argument(..., help="Action: cancel, status, or schedule"),
+    config_path: Path = typer.Option(
+        ..., "--config-path", "-c", help="Path to YAML config file"
+    ),
+):
+    """
+    Manage auto-teardown: cancel scheduled teardown, check status, or schedule new teardown.
+    """
+    if not config_path.exists():
+        typer.echo(f"❌ Config file not found: {config_path}")
+        raise typer.Exit(code=1)
+    
+    config = yaml.safe_load(config_path.read_text())
+    workspace_name = config.get("name") or "default"
+    DEPLOYML_DIR = Path.cwd() / ".deployml" / workspace_name
+    
+    if action == "cancel":
+        cancel_teardown(config, DEPLOYML_DIR, workspace_name)
+    elif action == "status":
+        show_teardown_status(DEPLOYML_DIR, workspace_name)
+    elif action == "schedule":
+        schedule_teardown(config, DEPLOYML_DIR, workspace_name)
+    else:
+        typer.echo(f"❌ Unknown action: {action}. Use: cancel, status, or schedule")
+        raise typer.Exit(code=1)
+
+
+def cancel_teardown(config: dict, deployml_dir: Path, workspace_name: str):
+    """Cancel scheduled teardown."""
+    project_id = config["provider"]["project_id"]
+    region = config["provider"]["region"]
+    
+    # Delete Cloud Scheduler job
+    scheduler_job_name = f"deployml-teardown-{workspace_name}"
+    result = subprocess.run(
+        ["gcloud", "scheduler", "jobs", "delete", scheduler_job_name,
+         "--project", project_id, "--region", region, "--quiet"],
+        capture_output=True,
+        text=True,
+    )
+    
+    if result.returncode == 0:
+        typer.echo("✅ Scheduled teardown cancelled")
+        # Update metadata
+        metadata = load_deployment_metadata(deployml_dir)
+        if metadata:
+            metadata["teardown_enabled"] = False
+            save_deployment_metadata(deployml_dir, metadata)
+    else:
+        typer.echo(f"⚠️ Could not cancel teardown: {result.stderr}")
+        typer.echo("   The scheduler job may not exist or may have already been deleted.")
+
+
+def show_teardown_status(deployml_dir: Path, workspace_name: str):
+    """Show teardown status."""
+    metadata = load_deployment_metadata(deployml_dir)
+    
+    if not metadata or not metadata.get("teardown_enabled"):
+        typer.echo("ℹ️ Auto-teardown is not enabled for this workspace")
+        return
+    
+    deployed_at = datetime.fromisoformat(metadata["deployed_at"])
+    teardown_at = datetime.fromisoformat(metadata["teardown_scheduled_at"])
+    now = datetime.utcnow()
+    
+    if now >= teardown_at:
+        typer.echo("⚠️ Teardown time has passed (may have already executed)")
+    else:
+        time_remaining = teardown_at - now
+        hours = int(time_remaining.total_seconds() // 3600)
+        minutes = int((time_remaining.total_seconds() % 3600) // 60)
+        typer.echo(f"⏰ Scheduled teardown: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        typer.echo(f"   Time remaining: {hours}h {minutes}m")
+        typer.echo(f"   To cancel: deployml teardown cancel --config-path <config-file>")
+
+
+def schedule_teardown(config: dict, deployml_dir: Path, workspace_name: str):
+    """Schedule a new teardown."""
+    duration_hours = typer.prompt("Hours until teardown", default=24, type=int)
+    deployed_at = datetime.utcnow()
+    teardown_at = deployed_at + timedelta(hours=duration_hours)
+    
+    metadata = {
+        "deployed_at": deployed_at.isoformat(),
+        "teardown_scheduled_at": teardown_at.isoformat(),
+        "teardown_enabled": True,
+        "duration_hours": duration_hours
+    }
+    save_deployment_metadata(deployml_dir, metadata)
+    
+    typer.echo(f"✅ Teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    typer.echo("⚠️ Note: This only updates local metadata. To actually schedule teardown,")
+    typer.echo("   you need to redeploy with teardown.enabled: true in your config.")
 
 
 @cli.command()

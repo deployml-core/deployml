@@ -40,6 +40,26 @@ provider "{% if cloud == 'gcp' %}google{% elif cloud == 'aws' %}aws{% else %}{{c
   {% endfor %}
 {% endfor %}
 
+{# Auto-teardown module #}
+{% if teardown_config and teardown_config.get("enabled", false) %}
+module "teardown" {
+  source = "./modules/teardown/cloud/gcp"
+  
+  project_id  = var.project_id
+  region      = var.region
+  workspace_name = "{{ stack_name }}"
+  
+  {% set duration_hours = teardown_config.get("duration_hours", 24) %}
+  {% set deployed_at = deployment_timestamp %}
+  {% set teardown_time = deployed_at + (duration_hours * 3600) %}
+  {% set teardown_cron = calculate_cron_from_timestamp(teardown_time) %}
+  schedule = "{{ teardown_cron }}"
+  
+  time_zone = "{{ teardown_config.get('time_zone', 'UTC') }}"
+  terraform_state_bucket = var.terraform_state_bucket
+}
+{% endif %}
+
 # Create Cloud SQL PostgreSQL instance if needed
 {% if flags.needs_postgres %}
 module "cloud_sql_postgres" {
@@ -304,6 +324,33 @@ output "metrics_connection_string" {
 }
 output "metrics_connection_string_cloud_sql" {
   value = module.cloud_sql_postgres.metrics_connection_string_cloud_sql
+}
+{% endif %}
+
+{# Auto-teardown module #}
+{% if teardown_config and teardown_config.get("enabled", false) %}
+module "teardown" {
+  source = "./modules/teardown/cloud/gcp"
+  
+  project_id     = var.project_id
+  region         = var.region
+  workspace_name = "{{ stack_name }}"
+  
+  schedule = "{{ teardown_cron_schedule }}"
+  
+  time_zone = "{{ teardown_config.get('time_zone', 'UTC') }}"
+  terraform_state_bucket = var.terraform_state_bucket
+  terraform_files_bucket = var.terraform_files_bucket
+}
+
+output "teardown_scheduler_job" {
+  value       = module.teardown.scheduler_job_name
+  description = "Name of the Cloud Scheduler job for auto-teardown"
+}
+
+output "teardown_scheduled_at" {
+  value       = "{{ teardown_scheduled_timestamp }}"
+  description = "Unix timestamp when teardown is scheduled"
 }
 {% endif %}
 
