@@ -882,13 +882,15 @@ def deploy(
     name_hash = hashlib.sha1(name_material).hexdigest()[:6]
 
     # Calculate teardown schedule (teardown_config and teardown_enabled already defined above)
+    # Note: This is a preliminary schedule - will be updated after Terraform completes with exact time
     teardown_cron_schedule = ""
     teardown_scheduled_timestamp = 0
     
     if teardown_enabled:
         duration_hours = teardown_config.get("duration_hours", 24)
         deployed_at = datetime.utcnow()
-        teardown_at = deployed_at + timedelta(hours=duration_hours)
+        # Add buffer to ensure schedule is in future (will be updated to exact time after deployment)
+        teardown_at = deployed_at + timedelta(hours=duration_hours, minutes=10)
         teardown_scheduled_timestamp = int(teardown_at.timestamp())
         teardown_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
 
@@ -1092,22 +1094,55 @@ def deploy(
                     typer.echo(f"⚠️  Warning: Could not upload files/manifest to GCS: {e}")
                     typer.echo("   Teardown may not work automatically. Manual teardown required.")
             
-            # Handle auto-teardown metadata
+            # Handle auto-teardown metadata and update scheduler schedule
             if teardown_enabled:
                 duration_hours = teardown_config.get("duration_hours", 24)
+                # Calculate teardown time AFTER deployment completes (not before)
                 deployed_at = datetime.utcnow()
                 teardown_at = deployed_at + timedelta(hours=duration_hours)
+                
+                # Calculate the correct cron schedule based on actual deployment completion time
+                teardown_scheduled_timestamp = int(teardown_at.timestamp())
+                correct_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
+                time_zone = teardown_config.get("time_zone", "UTC")
+                
+                # Update the Cloud Scheduler job with the correct schedule
+                scheduler_job_name = f"deployml-teardown-{workspace_name}"
+                try:
+                    typer.echo(f"⏰ Updating teardown schedule to: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                    update_result = subprocess.run(
+                        [
+                            "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
+                            "--location", region,
+                            "--schedule", correct_cron_schedule,
+                            "--time-zone", time_zone,
+                            "--project", project_id,
+                            "--quiet"
+                        ],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if update_result.returncode == 0:
+                        typer.echo(f"✅ Teardown schedule updated successfully")
+                    else:
+                        typer.echo(f"⚠️  Warning: Could not update scheduler schedule: {update_result.stderr}")
+                        typer.echo(f"   Schedule may be incorrect. Check manually with:")
+                        typer.echo(f"   gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id}")
+                except Exception as e:
+                    typer.echo(f"⚠️  Warning: Could not update scheduler schedule: {e}")
+                    typer.echo(f"   Schedule may be incorrect. Check manually with:")
+                    typer.echo(f"   gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id}")
                 
                 metadata = {
                     "deployed_at": deployed_at.isoformat(),
                     "teardown_scheduled_at": teardown_at.isoformat(),
                     "teardown_enabled": True,
                     "duration_hours": duration_hours,
-                    "scheduler_job_name": f"deployml-teardown-{workspace_name}"
+                    "scheduler_job_name": scheduler_job_name
                 }
                 save_deployment_metadata(DEPLOYML_DIR, metadata)
                 
-                typer.echo(f"\n Auto-teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                typer.echo(f"\n✅ Auto-teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
                 typer.echo(f"   (in {duration_hours} hours)")
                 typer.echo(f"   To cancel: deployml teardown cancel --config-path {config_path}")
             
@@ -1319,7 +1354,7 @@ def teardown(
     ),
 ):
     """
-    Manage auto-teardown: cancel scheduled teardown, check status, or schedule new teardown.
+    Manage auto-teardown: cancel scheduled teardown, check status, update schedule, or schedule new teardown.
     """
     if not config_path.exists():
         typer.echo(f"❌ Config file not found: {config_path}")
@@ -1332,11 +1367,13 @@ def teardown(
     if action == "cancel":
         cancel_teardown(config, DEPLOYML_DIR, workspace_name)
     elif action == "status":
-        show_teardown_status(DEPLOYML_DIR, workspace_name)
+        show_teardown_status(config, DEPLOYML_DIR, workspace_name)
+    elif action == "update":
+        update_teardown_schedule(config, DEPLOYML_DIR, workspace_name)
     elif action == "schedule":
         schedule_teardown(config, DEPLOYML_DIR, workspace_name)
     else:
-        typer.echo(f"❌ Unknown action: {action}. Use: cancel, status, or schedule")
+        typer.echo(f"❌ Unknown action: {action}. Use: cancel, status, update, or schedule")
         raise typer.Exit(code=1)
 
 
@@ -1366,27 +1403,235 @@ def cancel_teardown(config: dict, deployml_dir: Path, workspace_name: str):
         typer.echo("   The scheduler job may not exist or may have already been deleted.")
 
 
-def show_teardown_status(deployml_dir: Path, workspace_name: str):
-    """Show teardown status."""
-    metadata = load_deployment_metadata(deployml_dir)
+def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
+    """Show teardown status by querying Cloud Scheduler."""
+    project_id = config["provider"]["project_id"]
+    region = config["provider"]["region"]
+    scheduler_job_name = f"deployml-teardown-{workspace_name}"
     
-    if not metadata or not metadata.get("teardown_enabled"):
-        typer.echo("ℹ️ Auto-teardown is not enabled for this workspace")
+    # Query Cloud Scheduler job
+    result = subprocess.run(
+        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
+         "--project", project_id, "--location", region, "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    
+    if result.returncode != 0:
+        typer.echo(f"⚠️ Cloud Scheduler job not found: {scheduler_job_name}")
+        typer.echo("   Teardown may not be scheduled or may have already been cancelled.")
+        
+        # Check local metadata as fallback
+        metadata = load_deployment_metadata(deployml_dir)
+        if metadata and metadata.get("teardown_enabled"):
+            teardown_at = datetime.fromisoformat(metadata["teardown_scheduled_at"])
+            typer.echo(f"\n📋 Local metadata shows teardown was scheduled for:")
+            typer.echo(f"   {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         return
     
-    deployed_at = datetime.fromisoformat(metadata["deployed_at"])
-    teardown_at = datetime.fromisoformat(metadata["teardown_scheduled_at"])
-    now = datetime.utcnow()
+    # Parse Cloud Scheduler job details
+    try:
+        job_info = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        typer.echo("❌ Failed to parse Cloud Scheduler job information")
+        return
     
-    if now >= teardown_at:
-        typer.echo("⚠️ Teardown time has passed (may have already executed)")
+    # Extract information
+    schedule = job_info.get("schedule", "N/A")
+    time_zone = job_info.get("timeZone", "UTC")
+    state = job_info.get("state", "UNKNOWN")
+    schedule_time = job_info.get("scheduleTime", "")
+    last_attempt_time = job_info.get("lastAttemptTime", "")
+    
+    # Display comprehensive status
+    typer.echo("📋 Auto-Teardown Status")
+    typer.echo("=" * 60)
+    
+    # Job state
+    state_emoji = "✅" if state == "ENABLED" else "⏸️" if state == "PAUSED" else "❌"
+    typer.echo(f"{state_emoji} Status: {state}")
+    
+    # Cron schedule
+    typer.echo(f"📅 Cron Schedule: {schedule}")
+    typer.echo(f"🌍 Timezone: {time_zone}")
+    
+    # Next execution time
+    if schedule_time:
+        try:
+            # Parse ISO format with Z suffix (UTC)
+            time_str = schedule_time.replace('Z', '+00:00')
+            next_run = datetime.fromisoformat(time_str)
+            # Get current UTC time as timezone-aware
+            from datetime import timezone
+            now = datetime.now(timezone.utc)
+            typer.echo(f"⏰ Next Execution: {next_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            
+            if now < next_run:
+                time_remaining = next_run - now
+                hours = int(time_remaining.total_seconds() // 3600)
+                minutes = int((time_remaining.total_seconds() % 3600) // 60)
+                typer.echo(f"   ⏳ Time Remaining: {hours}h {minutes}m")
+            else:
+                time_passed = now - next_run
+                hours_passed = int(time_passed.total_seconds() // 3600)
+                minutes_passed = int((time_passed.total_seconds() % 3600) // 60)
+                typer.echo(f"   ⚠️  Scheduled time passed {hours_passed}h {minutes_passed}m ago")
+        except Exception as e:
+            typer.echo(f"⏰ Next Execution: {schedule_time}")
+    
+    # Last attempt
+    if last_attempt_time and last_attempt_time != "1970-01-01T00:00:00Z":
+        try:
+            # Parse ISO format with Z suffix (UTC)
+            time_str = last_attempt_time.replace('Z', '+00:00')
+            last_run = datetime.fromisoformat(time_str)
+            typer.echo(f"🕐 Last Execution: {last_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        except Exception:
+            typer.echo(f"🕐 Last Execution: {last_attempt_time}")
     else:
-        time_remaining = teardown_at - now
-        hours = int(time_remaining.total_seconds() // 3600)
-        minutes = int((time_remaining.total_seconds() % 3600) // 60)
-        typer.echo(f"⏰ Scheduled teardown: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-        typer.echo(f"   Time remaining: {hours}h {minutes}m")
-        typer.echo(f"   To cancel: deployml teardown cancel --config-path <config-file>")
+        typer.echo("🕐 Last Execution: Never")
+    
+    # Job name for reference
+    typer.echo(f"\n📌 Job Name: {scheduler_job_name}")
+    
+    # Actions
+    typer.echo("\n💡 Actions:")
+    typer.echo(f"   Update: deployml teardown update --config-path <config-file>")
+    typer.echo(f"   Cancel: deployml teardown cancel --config-path <config-file>")
+    typer.echo(f"   View in Console: https://console.cloud.google.com/cloudscheduler/jobs/edit/{region}/{scheduler_job_name}?project={project_id}")
+
+
+def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: str):
+    """Update the scheduled teardown time."""
+    project_id = config["provider"]["project_id"]
+    region = config["provider"]["region"]
+    scheduler_job_name = f"deployml-teardown-{workspace_name}"
+    
+    # Check if Cloud Scheduler job exists
+    result = subprocess.run(
+        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
+         "--project", project_id, "--location", region, "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    
+    if result.returncode != 0:
+        typer.echo(f"❌ Cloud Scheduler job not found: {scheduler_job_name}")
+        typer.echo("   Cannot update schedule. The teardown job may not exist.")
+        typer.echo("   Use 'deployml deploy' with teardown.enabled: true to create it.")
+        raise typer.Exit(code=1)
+    
+    # Get current job info to preserve timezone
+    try:
+        job_info = json.loads(result.stdout)
+        time_zone = job_info.get("timeZone", "UTC")
+    except json.JSONDecodeError:
+        time_zone = "UTC"
+    
+    # Prompt for new schedule
+    typer.echo("📅 Update Teardown Schedule")
+    typer.echo("=" * 60)
+    
+    # Show current schedule
+    try:
+        schedule_time = job_info.get("scheduleTime", "")
+        if schedule_time:
+            time_str = schedule_time.replace('Z', '+00:00')
+            current_time = datetime.fromisoformat(time_str)
+            typer.echo(f"⏰ Current Schedule: {current_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    except Exception:
+        pass
+    
+    # Get new duration
+    duration_hours = typer.prompt("Hours until new teardown time", default=24, type=int)
+    
+    if duration_hours < 0:
+        typer.echo("❌ Duration must be positive")
+        raise typer.Exit(code=1)
+    
+    # Calculate new teardown time
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    teardown_at = now + timedelta(hours=duration_hours)
+    # Use UTC timestamp directly to avoid timezone issues
+    teardown_scheduled_timestamp = int(teardown_at.timestamp())
+    new_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
+    
+    typer.echo(f"\n⏰ New Schedule: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    
+    # Confirm update
+    confirm = typer.confirm("Update the teardown schedule?", default=True)
+    if not confirm:
+        typer.echo("❌ Update cancelled")
+        return
+    
+    # Update Cloud Scheduler job
+    typer.echo("\n🔄 Updating Cloud Scheduler job...")
+    typer.echo(f"   Cron schedule: {new_cron_schedule}")
+    update_result = subprocess.run(
+        [
+            "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
+            "--location", region,
+            "--schedule", new_cron_schedule,
+            "--time-zone", time_zone,
+            "--project", project_id,
+            "--quiet"
+        ],
+        capture_output=True,
+        text=True,
+    )
+    
+    if update_result.returncode != 0:
+        typer.echo(f"❌ Failed to update schedule: {update_result.stderr}")
+        if update_result.stdout:
+            typer.echo(f"   stdout: {update_result.stdout}")
+        raise typer.Exit(code=1)
+    
+    # Verify the update by querying the job again
+    verify_result = subprocess.run(
+        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
+         "--project", project_id, "--location", region, "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    
+    if verify_result.returncode == 0:
+        try:
+            updated_job_info = json.loads(verify_result.stdout)
+            updated_schedule_time = updated_job_info.get("scheduleTime", "")
+            updated_schedule = updated_job_info.get("schedule", "")
+            
+            if updated_schedule_time:
+                time_str = updated_schedule_time.replace('Z', '+00:00')
+                actual_time = datetime.fromisoformat(time_str)
+                typer.echo(f"\n✅ Teardown schedule updated successfully!")
+                typer.echo(f"   Scheduled time: {actual_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                typer.echo(f"   Cron schedule: {updated_schedule}")
+                
+                # Check if it matches what we intended
+                if actual_time.strftime('%Y-%m-%d %H:%M') != teardown_at.strftime('%Y-%m-%d %H:%M'):
+                    typer.echo(f"\n⚠️  Warning: Scheduled time differs from intended time")
+                    typer.echo(f"   Intended: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                    typer.echo(f"   Actual: {actual_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            else:
+                typer.echo(f"✅ Teardown schedule updated successfully!")
+                typer.echo(f"   Cron schedule: {updated_schedule}")
+        except Exception as e:
+            typer.echo(f"✅ Teardown schedule updated (verification failed: {e})")
+    else:
+        typer.echo(f"✅ Teardown schedule updated successfully!")
+        typer.echo(f"   (Could not verify - check with: gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id})")
+    
+    # Update local metadata
+    metadata = load_deployment_metadata(deployml_dir) or {}
+    metadata.update({
+        "deployed_at": metadata.get("deployed_at", now.isoformat()),
+        "teardown_scheduled_at": teardown_at.isoformat(),
+        "teardown_enabled": True,
+        "duration_hours": duration_hours,
+        "scheduler_job_name": scheduler_job_name
+    })
+    save_deployment_metadata(deployml_dir, metadata)
 
 
 def schedule_teardown(config: dict, deployml_dir: Path, workspace_name: str):

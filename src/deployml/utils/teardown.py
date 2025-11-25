@@ -45,6 +45,8 @@ def calculate_teardown_schedule(deployed_at: datetime, duration_hours: int) -> s
 
 def calculate_cron_from_timestamp(timestamp: int) -> str:
     """Convert Unix timestamp to cron expression."""
-    dt = datetime.utcfromtimestamp(timestamp)
+    # Use UTC timezone-aware datetime to ensure correct conversion
+    from datetime import timezone
+    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
     return f"{dt.minute} {dt.hour} {dt.day} {dt.month} *"
 
