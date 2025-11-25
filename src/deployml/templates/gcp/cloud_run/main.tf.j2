@@ -127,7 +127,7 @@ module "{{ stage_name }}_{{ tool.name }}" {
       image = var.{{ stage_name }}_{{ tool.name }}_image != "" ? var.{{ stage_name }}_{{ tool.name }}_image : var.global_image
     {% elif key == "artifact_bucket" %}
       # Skip - already handled above
-    {% elif key not in resource_params and key != "create_artifact_bucket" and key != "backend_store_uri" and key != "use_postgres" %}
+    {% elif key not in resource_params and key != "create_artifact_bucket" and key != "backend_store_uri" and key != "use_postgres" and key != "allow_public_access" %}
       {{ key }} = var.{{ key }}
     {% endif %}
   {% endfor %}

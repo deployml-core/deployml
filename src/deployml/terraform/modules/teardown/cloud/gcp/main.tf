@@ -1,10 +1,11 @@
-# Teardown module - Creates Cloud Function and Cloud Scheduler for auto-teardown
+# Teardown module - Creates Cloud Run Job and Cloud Scheduler for auto-teardown
 
 resource "google_project_service" "required" {
   for_each = toset([
-    "cloudfunctions.googleapis.com",
+    "run.googleapis.com",
     "cloudscheduler.googleapis.com",
-    "storage-api.googleapis.com"
+    "storage-api.googleapis.com",
+    "secretmanager.googleapis.com"
   ])
   project            = var.project_id
   service            = each.value
@@ -13,64 +14,28 @@ resource "google_project_service" "required" {
 
 data "google_project" "current" {}
 
-# Archive Cloud Function source code
-data "archive_file" "function_source" {
-  type        = "zip"
-  source_dir  = "${path.module}/cloud_function"
-  output_path = "${path.module}/function.zip"
-}
-
-# Cloud Storage bucket for function source code
-resource "google_storage_bucket" "function_source" {
-  name     = "${var.project_id}-teardown-functions-${random_id.bucket_suffix.hex}"
+# GCS bucket for storing Terraform files and resource manifest
+resource "google_storage_bucket" "terraform_files" {
+  name     = "${var.project_id}-deployml-terraform-${random_id.bucket_suffix.hex}"
   location = var.region
   project  = var.project_id
 
   uniform_bucket_level_access = true
   force_destroy               = true
+  
+  versioning {
+    enabled = true
+  }
 }
 
 resource "random_id" "bucket_suffix" {
   byte_length = 4
 }
 
-# Upload function source code
-resource "google_storage_bucket_object" "function_source" {
-  name   = "teardown-function-${data.archive_file.function_source.output_md5}.zip"
-  bucket = google_storage_bucket.function_source.name
-  source = data.archive_file.function_source.output_path
-}
-
-# Cloud Function
-resource "google_cloudfunctions_function" "teardown" {
-  name        = "deployml-teardown-${var.workspace_name}"
-  description = "Auto-teardown function for DeployML workspace: ${var.workspace_name}"
-  runtime     = "python311"
-  region      = var.region
-  project     = var.project_id
-
-  available_memory_mb   = 256
-  source_archive_bucket = google_storage_bucket.function_source.name
-  source_archive_object = google_storage_bucket_object.function_source.name
-  trigger {
-    http_trigger {
-      security_level = "SECURE_ALWAYS"
-    }
-  }
-  entry_point = "teardown_infrastructure"
-
-  environment_variables = {
-    PROJECT_ID = var.project_id
-  }
-
-  service_account_email = google_service_account.teardown.email
-
-  depends_on = [google_project_service.required]
-}
-
-# Service account for Cloud Function
+# Service account for Cloud Run Job
 resource "google_service_account" "teardown" {
-  account_id   = "deployml-teardown-${substr(replace(var.workspace_name, "-", ""), 0, 20)}"
+  # account_id must be 6-30 chars. "deployml-teardown-" is 18 chars, leaving 12 for workspace name
+  account_id   = "deployml-teardown-${substr(replace(var.workspace_name, "-", ""), 0, 12)}"
   display_name = "DeployML Teardown Service Account"
   project      = var.project_id
 }
@@ -78,12 +43,17 @@ resource "google_service_account" "teardown" {
 # Grant permissions to service account
 resource "google_project_iam_member" "teardown_permissions" {
   for_each = toset([
-    "roles/run.admin",           # To destroy Cloud Run services
-    "roles/compute.instanceAdmin.v1",  # To destroy VMs
-    "roles/storage.admin",       # To destroy storage buckets
-    "roles/cloudsql.admin",      # To destroy Cloud SQL instances
-    "roles/iam.serviceAccountUser",  # To use service accounts
-    "roles/resourcemanager.projectIamAdmin"  # To clean up IAM bindings
+    "roles/run.admin",                    # To destroy Cloud Run services and jobs
+    "roles/compute.instanceAdmin.v1",     # To destroy VMs
+    "roles/storage.admin",                # To destroy storage buckets
+    "roles/cloudsql.admin",               # To destroy Cloud SQL instances
+    "roles/iam.serviceAccountUser",       # To use service accounts
+    "roles/resourcemanager.projectIamAdmin", # To clean up IAM bindings
+    "roles/storage.objectAdmin",          # To read/write files in GCS
+    "roles/secretmanager.secretAccessor",  # To access secrets
+    "roles/pubsub.admin",                 # To delete Pub/Sub topics
+    "roles/cloudscheduler.admin",         # To delete scheduler jobs
+    "roles/cloudbuild.builds.builder"     # To delete Cloud Build triggers (if any exist from old deployments)
   ])
   
   project = var.project_id
@@ -91,7 +61,72 @@ resource "google_project_iam_member" "teardown_permissions" {
   member  = "serviceAccount:${google_service_account.teardown.email}"
 }
 
-# Cloud Scheduler job
+# Upload teardown script to GCS
+resource "google_storage_bucket_object" "teardown_script" {
+  name   = "${var.workspace_name}/teardown.sh"
+  bucket = google_storage_bucket.terraform_files.name
+  source = "${path.module}/teardown_script.sh"
+}
+
+# Cloud Run Job for teardown
+resource "google_cloud_run_v2_job" "teardown" {
+  name                = "deployml-teardown-${var.workspace_name}"
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false
+
+  template {
+    template {
+      service_account = google_service_account.teardown.email
+      containers {
+        image = "gcr.io/google.com/cloudsdktool/cloud-sdk:latest"
+        
+        command = ["bash"]
+        args = [
+          "-c",
+          <<-EOT
+            # Download teardown script
+            gsutil cp gs://${google_storage_bucket.terraform_files.name}/${var.workspace_name}/teardown.sh /tmp/teardown.sh
+            chmod +x /tmp/teardown.sh
+            
+            # Set environment variables
+            export WORKSPACE_NAME="${var.workspace_name}"
+            export PROJECT_ID="${var.project_id}"
+            export REGION="${var.region}"
+            
+            # Run teardown script
+            /tmp/teardown.sh
+          EOT
+        ]
+        
+        resources {
+          limits = {
+            cpu    = "2"
+            memory = "2Gi"
+          }
+        }
+      }
+      
+      timeout = "1800s"  # 30 minutes
+    }
+  }
+
+  depends_on = [
+    google_project_service.required,
+    google_storage_bucket_object.teardown_script
+  ]
+}
+
+# Grant Cloud Scheduler (via compute service account) permission to invoke the Cloud Run Job
+resource "google_cloud_run_v2_job_iam_member" "scheduler_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_job.teardown.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+# Cloud Scheduler job that triggers Cloud Run Job
 resource "google_cloud_scheduler_job" "teardown" {
   name        = "deployml-teardown-${var.workspace_name}"
   description = "Auto-teardown job for DeployML workspace: ${var.workspace_name}"
@@ -101,40 +136,16 @@ resource "google_cloud_scheduler_job" "teardown" {
   project     = var.project_id
 
   http_target {
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${google_cloud_run_v2_job.teardown.name}:run"
     http_method = "POST"
-    uri         = google_cloudfunctions_function.teardown.https_trigger_url
     
-    body = base64encode(jsonencode({
-      workspace_name         = var.workspace_name
-      project_id            = var.project_id
-      terraform_state_bucket = var.terraform_state_bucket
-      terraform_files_bucket = var.terraform_files_bucket
-    }))
-    
-    headers = {
-      "Content-Type" = "application/json"
-    }
-    
-    oidc_token {
-      service_account_email = google_service_account.teardown.email
+    oauth_token {
+      service_account_email = "${data.google_project.current.number}-compute@developer.gserviceaccount.com"
     }
   }
 
-  depends_on = [google_project_service.required]
-}
-
-# Outputs
-output "function_url" {
-  value       = google_cloudfunctions_function.teardown.https_trigger_url
-  description = "URL of the teardown Cloud Function"
-}
-
-output "scheduler_job_name" {
-  value       = google_cloud_scheduler_job.teardown.name
-  description = "Name of the Cloud Scheduler job"
-}
-
-output "scheduler_job_id" {
-  value       = google_cloud_scheduler_job.teardown.id
-  description = "ID of the Cloud Scheduler job"
+  depends_on = [
+    google_project_service.required,
+    google_cloud_run_v2_job_iam_member.scheduler_invoker
+  ]
 }

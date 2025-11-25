@@ -376,4 +376,31 @@ output "{{ stage_name }}_{{ tool.name }}_jobs_summary" {
   {% endfor %}
 {% endfor %}
 
+{# Auto-teardown module #}
+{% if teardown_config and teardown_config.get("enabled", false) %}
+module "teardown" {
+  source = "./modules/teardown/cloud/gcp"
+  
+  project_id     = var.project_id
+  region         = var.region
+  workspace_name = "{{ stack_name }}"
+  
+  schedule = "{{ teardown_cron_schedule }}"
+  
+  time_zone = "{{ teardown_config.get('time_zone', 'UTC') }}"
+  terraform_state_bucket = var.terraform_state_bucket
+  terraform_files_bucket = var.terraform_files_bucket
+}
+
+output "teardown_scheduler_job" {
+  value       = module.teardown.scheduler_job_name
+  description = "Name of the Cloud Scheduler job for auto-teardown"
+}
+
+output "teardown_scheduled_at" {
+  value       = "{{ teardown_scheduled_timestamp }}"
+  description = "Unix timestamp when teardown is scheduled"
+}
+{% endif %}
+
 {% endblock %} 
