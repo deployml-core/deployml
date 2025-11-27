@@ -1,0 +1,30 @@
+name: teardown-demo-stack
+provider:
+  name: gcp
+  project_id: mldeploy-468919
+  region: us-west1
+deployment:
+  type: cloud_run
+
+teardown:
+  enabled: true
+  duration_hours: 2
+  time_zone: "UTC"
+
+stack:
+  - experiment_tracking:
+      name: mlflow
+      params:
+        image: gcr.io/mldeploy-468919/mlflow/mlflow:latest
+        service_name: teardown-demo-mlflow-server
+  
+  - artifact_tracking:
+      name: mlflow
+      params:
+        image: gcr.io/mldeploy-468919/mlflow/mlflow:latest
+  
+  - model_registry:
+      name: mlflow
+      params: 
+        image: gcr.io/mldeploy-468919/mlflow/mlflow:latest
+        backend_store_uri: postgresql

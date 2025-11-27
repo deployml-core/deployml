@@ -21,8 +21,29 @@ def deploy(config_path: str, show_progress: bool = True) -> DeploymentStack:
     """
     config_file = Path(config_path)
     
+    # If relative path doesn't exist, try common locations
     if not config_file.exists():
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+        # Try in current directory
+        if not config_file.is_absolute():
+            # Try demo/ subdirectory
+            demo_path = Path("demo") / config_file.name
+            if demo_path.exists():
+                config_file = demo_path
+                print(f"ℹ️  Found config file in demo/ directory: {config_file}")
+            else:
+                # Try example/config/ subdirectory
+                example_path = Path("example/config") / config_file.name
+                if example_path.exists():
+                    config_file = example_path
+                    print(f"ℹ️  Found config file in example/config/ directory: {config_file}")
+                else:
+                    raise FileNotFoundError(
+                        f"Configuration file not found: {config_path}\n"
+                        f"Tried locations:\n"
+                        f"  - {Path(config_path).absolute()}\n"
+                        f"  - {Path('demo') / Path(config_path).name}\n"
+                        f"  - {Path('example/config') / Path(config_path).name}"
+                    )
     
     # Load configuration
     with open(config_file, 'r') as f:
@@ -44,8 +65,8 @@ def deploy(config_path: str, show_progress: bool = True) -> DeploymentStack:
     workspace_name = config.get('name', 'default')
     workspace_dir = Path.cwd() / ".deployml" / workspace_name
     
-    # Run deployment using CLI command with logs
-    _deploy_with_cli(config_path, workspace_dir)
+    # Run deployment using CLI command with logs (use resolved config_file path)
+    _deploy_with_cli(str(config_file), workspace_dir)
     
     # Create and return deployment stack
     stack = DeploymentStack(config, workspace_dir)
@@ -212,6 +233,9 @@ def _deploy_with_cli(config_path: str, workspace_dir: Path) -> None:
     print("📝 DEPLOYMENT LOG")
     print("="*60)
     
+    # Store output lines for error reporting
+    output_lines = []
+    
     # Run with live output
     process = subprocess.Popen(
         cmd,
@@ -223,6 +247,7 @@ def _deploy_with_cli(config_path: str, workspace_dir: Path) -> None:
     
     # Stream and format output line by line
     for line in iter(process.stdout.readline, ''):
+        output_lines.append(line)
         formatted_line = _format_deployment_line(line)
         if formatted_line is not None:
             print(formatted_line)
@@ -231,6 +256,48 @@ def _deploy_with_cli(config_path: str, workspace_dir: Path) -> None:
     process.wait()
     
     if process.returncode != 0:
-        print(f"\nDEPLOYMENT FAILED (Exit Code: {process.returncode})")
-        print("="*60)
-        raise RuntimeError(f"Deployment failed with exit code {process.returncode}")
+        # Force flush any pending output
+        sys.stdout.flush()
+        sys.stderr.flush()
+        
+        print(f"\n" + "="*60, flush=True)
+        print(f"❌ DEPLOYMENT FAILED (Exit Code: {process.returncode})", flush=True)
+        print("="*60, flush=True)
+        
+        # Show last 50 lines of output to help debug
+        print("\n📋 Last 50 lines of output:", flush=True)
+        print("-" * 60, flush=True)
+        for line in output_lines[-50:]:
+            # Show unformatted lines for error context
+            clean_line = line.rstrip()
+            if clean_line:
+                print(clean_line, flush=True)
+        
+        # Try to extract error message
+        error_lines = [line for line in output_lines if any(keyword in line.lower() for keyword in ['error', 'failed', 'fatal', 'exception', 'traceback'])]
+        if error_lines:
+            print("\n🔍 Error Summary:", flush=True)
+            print("-" * 60, flush=True)
+            for line in error_lines[-10:]:  # Last 10 error-related lines
+                clean_line = line.rstrip()
+                if clean_line:
+                    print(clean_line, flush=True)
+        else:
+            print("\n⚠️  No obvious error keywords found in output.", flush=True)
+            print("   Showing all output lines for debugging:", flush=True)
+            print("-" * 60, flush=True)
+            for line in output_lines:
+                clean_line = line.rstrip()
+                if clean_line:
+                    print(clean_line, flush=True)
+        
+        print("="*60, flush=True)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        
+        raise RuntimeError(
+            f"Deployment failed with exit code {process.returncode}. "
+            f"Check the output above for details. "
+            f"Total output lines: {len(output_lines)}, "
+            f"Error-related lines: {len([l for l in output_lines if any(k in l.lower() for k in ['error', 'failed', 'fatal'])])}"
+        )

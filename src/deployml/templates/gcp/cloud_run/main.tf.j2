@@ -62,13 +62,27 @@ module "teardown" {
 
 # Create Cloud SQL PostgreSQL instance if needed
 {% if flags.needs_postgres %}
+{% set has_feast = false %}
+{% set has_grafana = false %}
+{% for stage in stack %}
+  {% for stage_name, tool in stage.items() %}
+    {% if stage_name == "feature_store" and tool.name == "feast" %}
+      {% set has_feast = true %}
+    {% endif %}
+    {% if stage_name == "model_monitoring" and tool.name == "grafana" %}
+      {% set has_grafana = true %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
 module "cloud_sql_postgres" {
-  source = "./modules/{{ flags.first_tool_name }}/cloud/gcp/cloud_sql_postgres"
+  source = "./modules/cloud_sql_postgres"
   project_id      = var.project_id
   region          = var.region
   db_instance_name = "{{ flags.first_tool_name }}-postgres--{{ project_id }}"
   db_name         = "{{ flags.first_tool_name }}"
   db_user         = "{{ flags.first_tool_name }}"
+  create_feast_db = {{ "true" if has_feast else "false" }}
+  create_metrics_db = {{ "true" if has_grafana else "false" }}
 }
 {% endif %}
 
