@@ -217,3 +217,16 @@ variable "feast_create_bigquery_dataset" {
   default     = true
 }
 
+# Teardown-specific variables
+variable "terraform_state_bucket" {
+  description = "GCS bucket for storing Terraform state (optional, for teardown)"
+  type        = string
+  default     = ""
+}
+
+variable "terraform_files_bucket" {
+  description = "GCS bucket for storing Terraform files (optional, for teardown)"
+  type        = string
+  default     = ""
+}
+

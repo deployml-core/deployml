@@ -2,6 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any
+from datetime import datetime, timezone
 import pandas as pd
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -384,5 +385,158 @@ class DeploymentStack:
         
         for label, value in status_data:
             print(f"{label:20}: {value}")
+        
+        print("="*80)
+    
+    def get_teardown_status(self) -> Dict[str, Any]:
+        """
+        Get teardown status for this deployment stack.
+        
+        Returns:
+            Dictionary with status information including:
+            - exists: bool - Whether the scheduler job exists
+            - state: str - Job state (ENABLED, PAUSED, etc.)
+            - schedule: str - Cron schedule
+            - schedule_time: datetime - Next scheduled execution time
+            - time_zone: str - Timezone
+            - last_attempt_time: Optional[datetime] - Last execution time
+            - metadata: Optional[Dict] - Local metadata if available
+        """
+        from deployml.api import get_teardown_status as _get_teardown_status
+        
+        project_id = self.provider.get('project_id')
+        region = self.provider.get('region')
+        workspace_name = self.name
+        
+        if not project_id or not region:
+            return {
+                "exists": False,
+                "error": "Missing project_id or region in configuration"
+            }
+        
+        return _get_teardown_status(
+            project_id=project_id,
+            region=region,
+            workspace_name=workspace_name,
+            deployml_dir=self.workspace_dir
+        )
+    
+    def update_teardown_schedule(
+        self,
+        duration_hours: int,
+        time_zone: str = "UTC"
+    ) -> Dict[str, Any]:
+        """
+        Update teardown schedule for this deployment stack.
+        
+        Args:
+            duration_hours: Hours until teardown
+            time_zone: Timezone (default: UTC)
+        
+        Returns:
+            Dictionary with update result:
+            - success: bool - Whether update succeeded
+            - scheduled_time: datetime - New scheduled time
+            - cron_schedule: str - Cron expression
+            - error: Optional[str] - Error message if failed
+        """
+        from deployml.api import update_teardown_schedule as _update_teardown_schedule
+        
+        project_id = self.provider.get('project_id')
+        region = self.provider.get('region')
+        workspace_name = self.name
+        
+        if not project_id or not region:
+            return {
+                "success": False,
+                "error": "Missing project_id or region in configuration"
+            }
+        
+        return _update_teardown_schedule(
+            project_id=project_id,
+            region=region,
+            workspace_name=workspace_name,
+            duration_hours=duration_hours,
+            deployml_dir=self.workspace_dir,
+            time_zone=time_zone
+        )
+    
+    def cancel_teardown(self) -> Dict[str, Any]:
+        """
+        Cancel scheduled teardown for this deployment stack.
+        
+        Returns:
+            Dictionary with cancellation result:
+            - success: bool - Whether cancellation succeeded
+            - error: Optional[str] - Error message if failed
+        """
+        from deployml.api import cancel_teardown as _cancel_teardown
+        
+        project_id = self.provider.get('project_id')
+        region = self.provider.get('region')
+        workspace_name = self.name
+        
+        if not project_id or not region:
+            return {
+                "success": False,
+                "error": "Missing project_id or region in configuration"
+            }
+        
+        return _cancel_teardown(
+            project_id=project_id,
+            region=region,
+            workspace_name=workspace_name,
+            deployml_dir=self.workspace_dir
+        )
+    
+    def show_teardown_status(self):
+        """Display teardown status in a formatted way"""
+        status = self.get_teardown_status()
+        
+        print("\n" + "="*80)
+        print("AUTO-TEARDOWN STATUS")
+        print("="*80)
+        
+        if status.get("error"):
+            print(f"❌ Error: {status['error']}")
+            print("="*80)
+            return
+        
+        if not status.get("exists"):
+            print("ℹ️  Auto-teardown is not scheduled for this workspace")
+            print("="*80)
+            return
+        
+        state_emoji = "✅" if status.get("state") == "ENABLED" else "⏸️" if status.get("state") == "PAUSED" else "❌"
+        print(f"{state_emoji} Status: {status.get('state', 'UNKNOWN')}")
+        print(f"📅 Cron Schedule: {status.get('schedule', 'N/A')}")
+        print(f"🌍 Timezone: {status.get('time_zone', 'UTC')}")
+        
+        schedule_time = status.get("schedule_time")
+        if schedule_time:
+            print(f"⏰ Next Execution: {schedule_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            
+            now = datetime.now(timezone.utc)
+            if now < schedule_time:
+                time_remaining = schedule_time - now
+                hours = int(time_remaining.total_seconds() // 3600)
+                minutes = int((time_remaining.total_seconds() % 3600) // 60)
+                print(f"   ⏳ Time Remaining: {hours}h {minutes}m")
+            else:
+                time_passed = now - schedule_time
+                hours_passed = int(time_passed.total_seconds() // 3600)
+                minutes_passed = int((time_passed.total_seconds() % 3600) // 60)
+                print(f"   ⚠️  Scheduled time passed {hours_passed}h {minutes_passed}m ago")
+        
+        last_attempt = status.get("last_attempt_time")
+        if last_attempt:
+            print(f"🕐 Last Execution: {last_attempt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        else:
+            print("🕐 Last Execution: Never")
+        
+        print(f"\n📌 Job Name: {status.get('scheduler_job_name')}")
+        print("\n💡 Actions:")
+        print(f"   Update: stack.update_teardown_schedule(duration_hours=6)")
+        print(f"   Cancel: stack.cancel_teardown()")
         
         print("="*80)

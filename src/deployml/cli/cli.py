@@ -3,6 +3,7 @@ import yaml
 import typer
 import shutil
 import subprocess
+import re
 from deployml.utils.banner import display_banner
 from deployml.utils.menu import prompt, show_menu
 from deployml.utils.constants import (
@@ -39,10 +40,405 @@ from deployml.utils.infracost import (
     run_infracost_analysis,
     format_cost_for_confirmation,
 )
+from deployml.utils.teardown import (
+    save_deployment_metadata,
+    load_deployment_metadata,
+    calculate_cron_from_timestamp,
+)
+
+
+def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspace_name: str):
+    """
+    Upload Terraform files to GCS bucket for Cloud Build teardown.
+    Gets bucket name from Terraform state.
+    """
+    try:
+        # Get terraform files bucket from Terraform state
+        # The bucket is created by the teardown module
+        state_proc = subprocess.run(
+            ["terraform", "state", "list"],
+            cwd=terraform_dir,
+            capture_output=True,
+            text=True,
+        )
+        
+        if state_proc.returncode != 0:
+            typer.echo(f"⚠️  Could not read Terraform state: {state_proc.stderr}")
+            return
+        
+        # Find the terraform_files bucket resource
+        bucket_resource = None
+        for line in state_proc.stdout.split('\n'):
+            if 'module.teardown.google_storage_bucket.terraform_files' in line:
+                bucket_resource = line.strip()
+                break
+        
+        if not bucket_resource:
+            typer.echo("⚠️  Teardown module bucket not found in state. Skipping upload.")
+            return
+        
+        # Get bucket name from state
+        show_proc = subprocess.run(
+            ["terraform", "state", "show", bucket_resource],
+            cwd=terraform_dir,
+            capture_output=True,
+            text=True,
+        )
+        
+        if show_proc.returncode != 0:
+            typer.echo(f"⚠️  Could not get bucket name: {show_proc.stderr}")
+            return
+        
+        # Extract bucket name from terraform state show output
+        bucket_name = None
+        for line in show_proc.stdout.split('\n'):
+            if 'name' in line and '=' in line:
+                bucket_name = line.split('=')[1].strip().strip('"')
+                break
+        
+        if not bucket_name:
+            typer.echo("⚠️  Could not extract bucket name from state.")
+            return
+        
+        # Upload Terraform files
+        storage_client = storage.Client(project=project_id)
+        bucket = storage_client.bucket(bucket_name)
+        
+        # Upload all .tf files, .tfvars, and state files
+        terraform_files = list(terraform_dir.glob("*.tf")) + list(terraform_dir.glob("*.tfvars"))
+        terraform_files += list(terraform_dir.glob("terraform.tfstate*"))  # Include state files
+        terraform_files += list((terraform_dir / "modules").rglob("*.tf")) if (terraform_dir / "modules").exists() else []
+        
+        uploaded_count = 0
+        for tf_file in terraform_files:
+            if tf_file.is_file():
+                # Create relative path from terraform_dir
+                relative_path = tf_file.relative_to(terraform_dir)
+                blob_path = f"{workspace_name}/terraform/{relative_path}"
+                
+                blob = bucket.blob(blob_path)
+                blob.upload_from_filename(str(tf_file))
+                uploaded_count += 1
+        
+        typer.echo(f"✅ Uploaded {uploaded_count} Terraform files to gs://{bucket_name}/{workspace_name}/terraform/")
+        
+    except Exception as e:
+        typer.echo(f"⚠️  Error uploading Terraform files: {e}")
+        import traceback
+        typer.echo(traceback.format_exc())
+
+
+def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_name: str, region: str) -> dict:
+    """
+    Extract resource details from Terraform outputs and state.
+    Returns a manifest dictionary with all resources that need to be deleted.
+    """
+    import json
+    import subprocess
+    from urllib.parse import urlparse
+    
+    manifest = {
+        "workspace_name": workspace_name,
+        "project_id": project_id,
+        "region": region,
+        "resources": {
+            "cloud_run_services": [],
+            "cloud_run_jobs": [],
+            "cloud_sql_instances": [],
+            "storage_buckets": [],
+            "cloud_scheduler_jobs": [],
+            "pubsub_topics": [],
+            "secret_manager_secrets": [],
+            "service_accounts": [],
+            "cloud_build_triggers": [],
+        }
+    }
+    
+    # Get Terraform outputs
+    output_proc = subprocess.run(
+        ["terraform", "output", "-json"],
+        cwd=terraform_dir,
+        capture_output=True,
+        text=True,
+    )
+    
+    if output_proc.returncode == 0:
+        outputs = json.loads(output_proc.stdout)
+        
+        # Extract Cloud Run service names from URLs
+        for key, value in outputs.items():
+            output_val = value.get('value', '')
+            
+            # Cloud Run services - we'll extract from Terraform state instead of URLs
+            # (URLs contain hash suffixes that don't match actual service names)
+            pass  # Skip URL parsing, will get from state below
+            
+            # Storage buckets
+            if '_bucket' in key and output_val:
+                if isinstance(output_val, str) and output_val:
+                    manifest["resources"]["storage_buckets"].append({
+                        "name": output_val
+                    })
+            
+            # Cloud SQL instance connection name
+            if 'instance_connection_name' in key and output_val:
+                # Format: project:region:instance
+                parts = str(output_val).split(':')
+                if len(parts) == 3:
+                    manifest["resources"]["cloud_sql_instances"].append({
+                        "name": parts[2],
+                        "region": parts[1]
+                    })
+    
+    # Query Terraform state for additional resources
+    state_proc = subprocess.run(
+        ["terraform", "state", "list"],
+        cwd=terraform_dir,
+        capture_output=True,
+        text=True,
+    )
+    
+    if state_proc.returncode == 0:
+        state_resources = [r.strip() for r in state_proc.stdout.strip().split('\n') if r.strip()]
+        
+        for resource in state_resources:
+            try:
+                # Cloud Run services (v1 and v2)
+                if 'google_cloud_run_service' in resource and 'google_cloud_run_v2_job' not in resource:
+                    show_proc = subprocess.run(
+                        ["terraform", "state", "show", resource],
+                        cwd=terraform_dir,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if show_proc.returncode == 0:
+                        service_name = None
+                        service_region = region
+                        for line in show_proc.stdout.split('\n'):
+                            # Strip ANSI escape codes
+                            clean_line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+                            # Check for name field (but not location, id, or other fields)
+                            if (clean_line.strip().startswith('name') or ' = name' in clean_line.lower()) and '=' in clean_line and 'location' not in clean_line.lower() and 'id' not in clean_line.lower() and 'latest' not in clean_line.lower():
+                                parts = clean_line.split('=')
+                                if len(parts) >= 2:
+                                    potential_name = parts[1].strip().strip('"').strip("'")
+                                    # Remove ANSI codes from the name itself
+                                    potential_name = re.sub(r'\x1b\[[0-9;]*m', '', potential_name)
+                                    # Skip null, empty, or invalid values
+                                    if potential_name and potential_name.lower() != 'null' and '/' not in potential_name and '@' not in potential_name and len(potential_name) < 200:
+                                        service_name = potential_name
+                                        break
+                            # Check for location or region field
+                            elif (clean_line.strip().startswith('location') or clean_line.strip().startswith('region')) and '=' in clean_line:
+                                parts = clean_line.split('=')
+                                if len(parts) >= 2:
+                                    service_region = parts[1].strip().strip('"').strip("'")
+                                    service_region = re.sub(r'\x1b\[[0-9;]*m', '', service_region)
+                        if service_name:
+                            manifest["resources"]["cloud_run_services"].append({
+                                "name": service_name,
+                                "region": service_region
+                            })
+                
+                # Cloud Run Jobs
+                elif 'google_cloud_run_v2_job' in resource:
+                    show_proc = subprocess.run(
+                        ["terraform", "state", "show", resource],
+                        cwd=terraform_dir,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if show_proc.returncode == 0:
+                        for line in show_proc.stdout.split('\n'):
+                            if 'name' in line.lower() and '=' in line and 'location' not in line.lower():
+                                job_name = line.split('=')[1].strip().strip('"').strip("'")
+                                if job_name:
+                                    manifest["resources"]["cloud_run_jobs"].append({
+                                        "name": job_name,
+                                        "region": region
+                                    })
+                                    break
+                
+                # Cloud Scheduler jobs
+                elif 'google_cloud_scheduler_job' in resource:
+                    show_proc = subprocess.run(
+                        ["terraform", "state", "show", resource],
+                        cwd=terraform_dir,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if show_proc.returncode == 0:
+                        job_name = None
+                        job_region = region
+                        for line in show_proc.stdout.split('\n'):
+                            if 'name' in line.lower() and '=' in line and 'location' not in line.lower():
+                                job_name = line.split('=')[1].strip().strip('"').strip("'")
+                                # Extract job name from URL if it's a full URL
+                                if job_name and '/jobs/' in job_name:
+                                    job_name = job_name.split('/jobs/')[-1].split(':')[0].split('/')[-1]
+                            elif 'region' in line.lower() and '=' in line:
+                                job_region = line.split('=')[1].strip().strip('"').strip("'")
+                        if job_name:
+                            manifest["resources"]["cloud_scheduler_jobs"].append({
+                                "name": job_name,
+                                "region": job_region
+                            })
+                
+                # Pub/Sub topics
+                elif 'google_pubsub_topic' in resource:
+                    show_proc = subprocess.run(
+                        ["terraform", "state", "show", resource],
+                        cwd=terraform_dir,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if show_proc.returncode == 0:
+                        for line in show_proc.stdout.split('\n'):
+                            if 'name' in line.lower() and '=' in line:
+                                topic_name = line.split('=')[1].strip().strip('"').strip("'")
+                                if topic_name:
+                                    manifest["resources"]["pubsub_topics"].append({
+                                        "name": topic_name
+                                    })
+                                    break
+                
+                # Secret Manager secrets
+                elif 'google_secret_manager_secret' in resource:
+                    show_proc = subprocess.run(
+                        ["terraform", "state", "show", resource],
+                        cwd=terraform_dir,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if show_proc.returncode == 0:
+                        for line in show_proc.stdout.split('\n'):
+                            if 'secret_id' in line.lower() and '=' in line:
+                                secret_name = line.split('=')[1].strip().strip('"').strip("'")
+                                if secret_name:
+                                    manifest["resources"]["secret_manager_secrets"].append({
+                                        "name": secret_name
+                                    })
+                                    break
+                
+                # Service accounts (only teardown ones to avoid deleting user SAs)
+                elif 'google_service_account' in resource and 'teardown' in resource:
+                    show_proc = subprocess.run(
+                        ["terraform", "state", "show", resource],
+                        cwd=terraform_dir,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if show_proc.returncode == 0:
+                        for line in show_proc.stdout.split('\n'):
+                            if 'email' in line.lower() and '@' in line and '=' in line:
+                                sa_email = line.split('=')[1].strip().strip('"').strip("'")
+                                if sa_email:
+                                    manifest["resources"]["service_accounts"].append({
+                                        "email": sa_email
+                                    })
+                                    break
+                
+                # Cloud Build triggers
+                elif 'google_cloudbuild_trigger' in resource:
+                    show_proc = subprocess.run(
+                        ["terraform", "state", "show", resource],
+                        cwd=terraform_dir,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if show_proc.returncode == 0:
+                        for line in show_proc.stdout.split('\n'):
+                            if 'name' in line.lower() and '=' in line:
+                                trigger_name = line.split('=')[1].strip().strip('"').strip("'")
+                                if trigger_name:
+                                    manifest["resources"]["cloud_build_triggers"].append({
+                                        "name": trigger_name
+                                    })
+                                    break
+            except Exception as e:
+                # Skip resources that can't be parsed
+                continue
+    
+    # Remove duplicates
+    for resource_type in manifest["resources"]:
+        seen = set()
+        unique_resources = []
+        for res in manifest["resources"][resource_type]:
+            if resource_type in ["cloud_run_services", "cloud_run_jobs", "cloud_sql_instances", "cloud_scheduler_jobs"]:
+                key = (res.get("name"), res.get("region"))
+            elif resource_type == "service_accounts":
+                key = res.get("email")
+            else:
+                key = res.get("name")
+            
+            if key and key not in seen:
+                seen.add(key)
+                unique_resources.append(res)
+        manifest["resources"][resource_type] = unique_resources
+    
+    return manifest
+
+
+def upload_resource_manifest(manifest: dict, terraform_dir: Path, project_id: str, workspace_name: str):
+    """Upload resource manifest to GCS bucket."""
+    import json
+    
+    try:
+        # Get bucket name from Terraform state (same logic as upload_terraform_files_to_gcs)
+        state_proc = subprocess.run(
+            ["terraform", "state", "list"],
+            cwd=terraform_dir,
+            capture_output=True,
+            text=True,
+        )
+        
+        if state_proc.returncode != 0:
+            raise Exception(f"Could not read Terraform state: {state_proc.stderr}")
+        
+        bucket_resource = None
+        for line in state_proc.stdout.split('\n'):
+            if 'module.teardown.google_storage_bucket.terraform_files' in line:
+                bucket_resource = line.strip()
+                break
+        
+        if not bucket_resource:
+            raise Exception("Teardown module bucket not found in state")
+        
+        show_proc = subprocess.run(
+            ["terraform", "state", "show", bucket_resource],
+            cwd=terraform_dir,
+            capture_output=True,
+            text=True,
+        )
+        
+        if show_proc.returncode != 0:
+            raise Exception(f"Could not get bucket name: {show_proc.stderr}")
+        
+        bucket_name = None
+        for line in show_proc.stdout.split('\n'):
+            if 'name' in line and '=' in line:
+                bucket_name = line.split('=')[1].strip().strip('"')
+                break
+        
+        if not bucket_name:
+            raise Exception("Could not extract bucket name from state")
+        
+        # Upload manifest
+        storage_client = storage.Client(project=project_id)
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(f"{workspace_name}/resource-manifest.json")
+        blob.upload_from_string(json.dumps(manifest, indent=2))
+        
+        typer.echo(f"✅ Resource manifest uploaded to gs://{bucket_name}/{workspace_name}/resource-manifest.json")
+        
+    except Exception as e:
+        typer.echo(f"⚠️  Error uploading resource manifest: {e}")
+        raise
 
 import re
 import time
 import json
+from datetime import datetime, timedelta
 
 cli = typer.Typer()
 
@@ -402,12 +798,17 @@ def deploy(
                 }
             )
 
+    # Handle teardown configuration (needed before copying modules)
+    teardown_config = config.get("teardown", {})
+    teardown_enabled = teardown_config.get("enabled", False)
+
     typer.echo("📦 Copying module templates...")
     copy_modules_to_workspace(
         DEPLOYML_MODULES_DIR,
         stack=stack,
         deployment_type=deployment_type,
         cloud=cloud,
+        teardown_enabled=teardown_enabled,
     )
     # --- UNIFIED BUCKET CONFIGURATION APPROACH ---
     # Collect all bucket configurations in a structured way (similar to VM creation)
@@ -480,6 +881,19 @@ def deploy(
     name_material = f"{workspace_name}:{project_id}".encode("utf-8")
     name_hash = hashlib.sha1(name_material).hexdigest()[:6]
 
+    # Calculate teardown schedule (teardown_config and teardown_enabled already defined above)
+    # Note: This is a preliminary schedule - will be updated after Terraform completes with exact time
+    teardown_cron_schedule = ""
+    teardown_scheduled_timestamp = 0
+    
+    if teardown_enabled:
+        duration_hours = teardown_config.get("duration_hours", 24)
+        deployed_at = datetime.utcnow()
+        # Add buffer to ensure schedule is in future (will be updated to exact time after deployment)
+        teardown_at = deployed_at + timedelta(hours=duration_hours, minutes=10)
+        teardown_scheduled_timestamp = int(teardown_at.timestamp())
+        teardown_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
+
     # Render templates
     if deployment_type == "cloud_vm":
         main_tf = main_template.render(
@@ -493,6 +907,9 @@ def deploy(
             zone=config["provider"].get("zone", f"{region}-a"),
             stack_name=workspace_name,
             name_hash=name_hash,
+            teardown_config=teardown_config if teardown_enabled else None,
+            teardown_cron_schedule=teardown_cron_schedule,
+            teardown_scheduled_timestamp=teardown_scheduled_timestamp,
         )
     else:
         main_tf = main_template.render(
@@ -504,6 +921,9 @@ def deploy(
             project_id=project_id,
             stack_name=workspace_name,
             name_hash=name_hash,
+            teardown_config=teardown_config if teardown_enabled else None,
+            teardown_cron_schedule=teardown_cron_schedule,
+            teardown_scheduled_timestamp=teardown_scheduled_timestamp,
         )
     variables_tf = var_template.render(
         stack=stack,
@@ -650,8 +1070,82 @@ def deploy(
             DEPLOYML_TERRAFORM_DIR,
             minutes,
         )
-        if result_code == 0 or result_code == 1:
+        if result_code == 0:
             typer.echo("✅ Deployment complete!")
+            
+            # Upload Terraform files and resource manifest to GCS for teardown (if enabled)
+            if teardown_enabled:
+                try:
+                    typer.echo("📤 Uploading Terraform files to GCS for teardown...")
+                    upload_terraform_files_to_gcs(DEPLOYML_TERRAFORM_DIR, project_id, workspace_name)
+                    
+                    # Extract and upload resource manifest
+                    typer.echo("📋 Extracting resource manifest...")
+                    manifest = extract_resource_manifest(
+                        DEPLOYML_TERRAFORM_DIR,
+                        project_id,
+                        workspace_name,
+                        region
+                    )
+                    upload_resource_manifest(manifest, DEPLOYML_TERRAFORM_DIR, project_id, workspace_name)
+                    typer.echo("✅ Resource manifest uploaded successfully")
+                    
+                except Exception as e:
+                    typer.echo(f"⚠️  Warning: Could not upload files/manifest to GCS: {e}")
+                    typer.echo("   Teardown may not work automatically. Manual teardown required.")
+            
+            # Handle auto-teardown metadata and update scheduler schedule
+            if teardown_enabled:
+                duration_hours = teardown_config.get("duration_hours", 24)
+                # Calculate teardown time AFTER deployment completes (not before)
+                deployed_at = datetime.utcnow()
+                teardown_at = deployed_at + timedelta(hours=duration_hours)
+                
+                # Calculate the correct cron schedule based on actual deployment completion time
+                teardown_scheduled_timestamp = int(teardown_at.timestamp())
+                correct_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
+                time_zone = teardown_config.get("time_zone", "UTC")
+                
+                # Update the Cloud Scheduler job with the correct schedule
+                scheduler_job_name = f"deployml-teardown-{workspace_name}"
+                try:
+                    typer.echo(f"⏰ Updating teardown schedule to: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                    update_result = subprocess.run(
+                        [
+                            "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
+                            "--location", region,
+                            "--schedule", correct_cron_schedule,
+                            "--time-zone", time_zone,
+                            "--project", project_id,
+                            "--quiet"
+                        ],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if update_result.returncode == 0:
+                        typer.echo(f"✅ Teardown schedule updated successfully")
+                    else:
+                        typer.echo(f"⚠️  Warning: Could not update scheduler schedule: {update_result.stderr}")
+                        typer.echo(f"   Schedule may be incorrect. Check manually with:")
+                        typer.echo(f"   gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id}")
+                except Exception as e:
+                    typer.echo(f"⚠️  Warning: Could not update scheduler schedule: {e}")
+                    typer.echo(f"   Schedule may be incorrect. Check manually with:")
+                    typer.echo(f"   gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id}")
+                
+                metadata = {
+                    "deployed_at": deployed_at.isoformat(),
+                    "teardown_scheduled_at": teardown_at.isoformat(),
+                    "teardown_enabled": True,
+                    "duration_hours": duration_hours,
+                    "scheduler_job_name": scheduler_job_name
+                }
+                save_deployment_metadata(DEPLOYML_DIR, metadata)
+                
+                typer.echo(f"\n✅ Auto-teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                typer.echo(f"   (in {duration_hours} hours)")
+                typer.echo(f"   To cancel: deployml teardown cancel --config-path {config_path}")
+            
             # Show all Terraform outputs in a user-friendly way
             output_proc = subprocess.run(
                 ["terraform", "output", "-json"],
@@ -721,7 +1215,23 @@ def deploy(
             else:
                 typer.echo("⚠️ Could not retrieve Terraform outputs.")
         else:
-            typer.echo("❌ Terraform apply failed")
+            log_file = DEPLOYML_TERRAFORM_DIR / "terraform_apply.log"
+            typer.secho(f"\n❌ Terraform apply failed with exit code {result_code}", fg=typer.colors.RED, bold=True)
+            typer.echo(f"\n📋 Check the Terraform log for details:")
+            typer.echo(f"   {log_file}")
+            typer.echo(f"\n💡 Common issues:")
+            typer.echo("   - Required GCP APIs may not be enabled (check log for API activation URLs)")
+            typer.echo("   - Insufficient IAM permissions")
+            typer.echo("   - Resource conflicts or quota limits")
+            typer.echo("\n🔍 Last 20 lines of the log:")
+            if log_file.exists():
+                try:
+                    with open(log_file, 'r') as f:
+                        lines = f.readlines()
+                        for line in lines[-20:]:
+                            typer.echo(f"   {line.rstrip()}")
+                except Exception:
+                    pass
             raise typer.Exit(code=1)
     else:
         typer.echo("❌ Deployment cancelled")
@@ -834,6 +1344,313 @@ def status():
     Check the deployment status of the current workspace.
     """
     typer.echo("Checking deployment status...")
+
+
+@cli.command()
+def teardown(
+    action: str = typer.Argument(..., help="Action: cancel, status, or schedule"),
+    config_path: Path = typer.Option(
+        ..., "--config-path", "-c", help="Path to YAML config file"
+    ),
+):
+    """
+    Manage auto-teardown: cancel scheduled teardown, check status, update schedule, or schedule new teardown.
+    """
+    if not config_path.exists():
+        typer.echo(f"❌ Config file not found: {config_path}")
+        raise typer.Exit(code=1)
+    
+    config = yaml.safe_load(config_path.read_text())
+    workspace_name = config.get("name") or "default"
+    DEPLOYML_DIR = Path.cwd() / ".deployml" / workspace_name
+    
+    if action == "cancel":
+        cancel_teardown(config, DEPLOYML_DIR, workspace_name)
+    elif action == "status":
+        show_teardown_status(config, DEPLOYML_DIR, workspace_name)
+    elif action == "update":
+        update_teardown_schedule(config, DEPLOYML_DIR, workspace_name)
+    elif action == "schedule":
+        schedule_teardown(config, DEPLOYML_DIR, workspace_name)
+    else:
+        typer.echo(f"❌ Unknown action: {action}. Use: cancel, status, update, or schedule")
+        raise typer.Exit(code=1)
+
+
+def cancel_teardown(config: dict, deployml_dir: Path, workspace_name: str):
+    """Cancel scheduled teardown."""
+    project_id = config["provider"]["project_id"]
+    region = config["provider"]["region"]
+    
+    # Delete Cloud Scheduler job
+    scheduler_job_name = f"deployml-teardown-{workspace_name}"
+    result = subprocess.run(
+        ["gcloud", "scheduler", "jobs", "delete", scheduler_job_name,
+         "--project", project_id, "--region", region, "--quiet"],
+        capture_output=True,
+        text=True,
+    )
+    
+    if result.returncode == 0:
+        typer.echo("✅ Scheduled teardown cancelled")
+        # Update metadata
+        metadata = load_deployment_metadata(deployml_dir)
+        if metadata:
+            metadata["teardown_enabled"] = False
+            save_deployment_metadata(deployml_dir, metadata)
+    else:
+        typer.echo(f"⚠️ Could not cancel teardown: {result.stderr}")
+        typer.echo("   The scheduler job may not exist or may have already been deleted.")
+
+
+def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
+    """Show teardown status by querying Cloud Scheduler."""
+    project_id = config["provider"]["project_id"]
+    region = config["provider"]["region"]
+    scheduler_job_name = f"deployml-teardown-{workspace_name}"
+    
+    # Query Cloud Scheduler job
+    result = subprocess.run(
+        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
+         "--project", project_id, "--location", region, "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    
+    if result.returncode != 0:
+        typer.echo(f"⚠️ Cloud Scheduler job not found: {scheduler_job_name}")
+        typer.echo("   Teardown may not be scheduled or may have already been cancelled.")
+        
+        # Check local metadata as fallback
+        metadata = load_deployment_metadata(deployml_dir)
+        if metadata and metadata.get("teardown_enabled"):
+            teardown_at = datetime.fromisoformat(metadata["teardown_scheduled_at"])
+            typer.echo(f"\n📋 Local metadata shows teardown was scheduled for:")
+            typer.echo(f"   {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        return
+    
+    # Parse Cloud Scheduler job details
+    try:
+        job_info = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        typer.echo("❌ Failed to parse Cloud Scheduler job information")
+        return
+    
+    # Extract information
+    schedule = job_info.get("schedule", "N/A")
+    time_zone = job_info.get("timeZone", "UTC")
+    state = job_info.get("state", "UNKNOWN")
+    schedule_time = job_info.get("scheduleTime", "")
+    last_attempt_time = job_info.get("lastAttemptTime", "")
+    
+    # Display comprehensive status
+    typer.echo("📋 Auto-Teardown Status")
+    typer.echo("=" * 60)
+    
+    # Job state
+    state_emoji = "✅" if state == "ENABLED" else "⏸️" if state == "PAUSED" else "❌"
+    typer.echo(f"{state_emoji} Status: {state}")
+    
+    # Cron schedule
+    typer.echo(f"📅 Cron Schedule: {schedule}")
+    typer.echo(f"🌍 Timezone: {time_zone}")
+    
+    # Next execution time
+    if schedule_time:
+        try:
+            # Parse ISO format with Z suffix (UTC)
+            time_str = schedule_time.replace('Z', '+00:00')
+            next_run = datetime.fromisoformat(time_str)
+            # Get current UTC time as timezone-aware
+            from datetime import timezone
+            now = datetime.now(timezone.utc)
+            typer.echo(f"⏰ Next Execution: {next_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            
+            if now < next_run:
+                time_remaining = next_run - now
+                hours = int(time_remaining.total_seconds() // 3600)
+                minutes = int((time_remaining.total_seconds() % 3600) // 60)
+                typer.echo(f"   ⏳ Time Remaining: {hours}h {minutes}m")
+            else:
+                time_passed = now - next_run
+                hours_passed = int(time_passed.total_seconds() // 3600)
+                minutes_passed = int((time_passed.total_seconds() % 3600) // 60)
+                typer.echo(f"   ⚠️  Scheduled time passed {hours_passed}h {minutes_passed}m ago")
+        except Exception as e:
+            typer.echo(f"⏰ Next Execution: {schedule_time}")
+    
+    # Last attempt
+    if last_attempt_time and last_attempt_time != "1970-01-01T00:00:00Z":
+        try:
+            # Parse ISO format with Z suffix (UTC)
+            time_str = last_attempt_time.replace('Z', '+00:00')
+            last_run = datetime.fromisoformat(time_str)
+            typer.echo(f"🕐 Last Execution: {last_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        except Exception:
+            typer.echo(f"🕐 Last Execution: {last_attempt_time}")
+    else:
+        typer.echo("🕐 Last Execution: Never")
+    
+    # Job name for reference
+    typer.echo(f"\n📌 Job Name: {scheduler_job_name}")
+    
+    # Actions
+    typer.echo("\n💡 Actions:")
+    typer.echo(f"   Update: deployml teardown update --config-path <config-file>")
+    typer.echo(f"   Cancel: deployml teardown cancel --config-path <config-file>")
+    typer.echo(f"   View in Console: https://console.cloud.google.com/cloudscheduler/jobs/edit/{region}/{scheduler_job_name}?project={project_id}")
+
+
+def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: str):
+    """Update the scheduled teardown time."""
+    project_id = config["provider"]["project_id"]
+    region = config["provider"]["region"]
+    scheduler_job_name = f"deployml-teardown-{workspace_name}"
+    
+    # Check if Cloud Scheduler job exists
+    result = subprocess.run(
+        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
+         "--project", project_id, "--location", region, "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    
+    if result.returncode != 0:
+        typer.echo(f"❌ Cloud Scheduler job not found: {scheduler_job_name}")
+        typer.echo("   Cannot update schedule. The teardown job may not exist.")
+        typer.echo("   Use 'deployml deploy' with teardown.enabled: true to create it.")
+        raise typer.Exit(code=1)
+    
+    # Get current job info to preserve timezone
+    try:
+        job_info = json.loads(result.stdout)
+        time_zone = job_info.get("timeZone", "UTC")
+    except json.JSONDecodeError:
+        time_zone = "UTC"
+    
+    # Prompt for new schedule
+    typer.echo("📅 Update Teardown Schedule")
+    typer.echo("=" * 60)
+    
+    # Show current schedule
+    try:
+        schedule_time = job_info.get("scheduleTime", "")
+        if schedule_time:
+            time_str = schedule_time.replace('Z', '+00:00')
+            current_time = datetime.fromisoformat(time_str)
+            typer.echo(f"⏰ Current Schedule: {current_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    except Exception:
+        pass
+    
+    # Get new duration
+    duration_hours = typer.prompt("Hours until new teardown time", default=24, type=int)
+    
+    if duration_hours < 0:
+        typer.echo("❌ Duration must be positive")
+        raise typer.Exit(code=1)
+    
+    # Calculate new teardown time
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    teardown_at = now + timedelta(hours=duration_hours)
+    # Use UTC timestamp directly to avoid timezone issues
+    teardown_scheduled_timestamp = int(teardown_at.timestamp())
+    new_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
+    
+    typer.echo(f"\n⏰ New Schedule: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    
+    # Confirm update
+    confirm = typer.confirm("Update the teardown schedule?", default=True)
+    if not confirm:
+        typer.echo("❌ Update cancelled")
+        return
+    
+    # Update Cloud Scheduler job
+    typer.echo("\n🔄 Updating Cloud Scheduler job...")
+    typer.echo(f"   Cron schedule: {new_cron_schedule}")
+    update_result = subprocess.run(
+        [
+            "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
+            "--location", region,
+            "--schedule", new_cron_schedule,
+            "--time-zone", time_zone,
+            "--project", project_id,
+            "--quiet"
+        ],
+        capture_output=True,
+        text=True,
+    )
+    
+    if update_result.returncode != 0:
+        typer.echo(f"❌ Failed to update schedule: {update_result.stderr}")
+        if update_result.stdout:
+            typer.echo(f"   stdout: {update_result.stdout}")
+        raise typer.Exit(code=1)
+    
+    # Verify the update by querying the job again
+    verify_result = subprocess.run(
+        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
+         "--project", project_id, "--location", region, "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    
+    if verify_result.returncode == 0:
+        try:
+            updated_job_info = json.loads(verify_result.stdout)
+            updated_schedule_time = updated_job_info.get("scheduleTime", "")
+            updated_schedule = updated_job_info.get("schedule", "")
+            
+            if updated_schedule_time:
+                time_str = updated_schedule_time.replace('Z', '+00:00')
+                actual_time = datetime.fromisoformat(time_str)
+                typer.echo(f"\n✅ Teardown schedule updated successfully!")
+                typer.echo(f"   Scheduled time: {actual_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                typer.echo(f"   Cron schedule: {updated_schedule}")
+                
+                # Check if it matches what we intended
+                if actual_time.strftime('%Y-%m-%d %H:%M') != teardown_at.strftime('%Y-%m-%d %H:%M'):
+                    typer.echo(f"\n⚠️  Warning: Scheduled time differs from intended time")
+                    typer.echo(f"   Intended: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                    typer.echo(f"   Actual: {actual_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            else:
+                typer.echo(f"✅ Teardown schedule updated successfully!")
+                typer.echo(f"   Cron schedule: {updated_schedule}")
+        except Exception as e:
+            typer.echo(f"✅ Teardown schedule updated (verification failed: {e})")
+    else:
+        typer.echo(f"✅ Teardown schedule updated successfully!")
+        typer.echo(f"   (Could not verify - check with: gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id})")
+    
+    # Update local metadata
+    metadata = load_deployment_metadata(deployml_dir) or {}
+    metadata.update({
+        "deployed_at": metadata.get("deployed_at", now.isoformat()),
+        "teardown_scheduled_at": teardown_at.isoformat(),
+        "teardown_enabled": True,
+        "duration_hours": duration_hours,
+        "scheduler_job_name": scheduler_job_name
+    })
+    save_deployment_metadata(deployml_dir, metadata)
+
+
+def schedule_teardown(config: dict, deployml_dir: Path, workspace_name: str):
+    """Schedule a new teardown."""
+    duration_hours = typer.prompt("Hours until teardown", default=24, type=int)
+    deployed_at = datetime.utcnow()
+    teardown_at = deployed_at + timedelta(hours=duration_hours)
+    
+    metadata = {
+        "deployed_at": deployed_at.isoformat(),
+        "teardown_scheduled_at": teardown_at.isoformat(),
+        "teardown_enabled": True,
+        "duration_hours": duration_hours
+    }
+    save_deployment_metadata(deployml_dir, metadata)
+    
+    typer.echo(f"✅ Teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    typer.echo("⚠️ Note: This only updates local metadata. To actually schedule teardown,")
+    typer.echo("   you need to redeploy with teardown.enabled: true in your config.")
 
 
 @cli.command()

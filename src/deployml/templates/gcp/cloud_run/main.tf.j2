@@ -40,15 +40,49 @@ provider "{% if cloud == 'gcp' %}google{% elif cloud == 'aws' %}aws{% else %}{{c
   {% endfor %}
 {% endfor %}
 
+{# Auto-teardown module #}
+{% if teardown_config and teardown_config.get("enabled", false) %}
+module "teardown" {
+  source = "./modules/teardown/cloud/gcp"
+  
+  project_id  = var.project_id
+  region      = var.region
+  workspace_name = "{{ stack_name }}"
+  
+  {% set duration_hours = teardown_config.get("duration_hours", 24) %}
+  {% set deployed_at = deployment_timestamp %}
+  {% set teardown_time = deployed_at + (duration_hours * 3600) %}
+  {% set teardown_cron = calculate_cron_from_timestamp(teardown_time) %}
+  schedule = "{{ teardown_cron }}"
+  
+  time_zone = "{{ teardown_config.get('time_zone', 'UTC') }}"
+  terraform_state_bucket = var.terraform_state_bucket
+}
+{% endif %}
+
 # Create Cloud SQL PostgreSQL instance if needed
 {% if flags.needs_postgres %}
+{% set has_feast = false %}
+{% set has_grafana = false %}
+{% for stage in stack %}
+  {% for stage_name, tool in stage.items() %}
+    {% if stage_name == "feature_store" and tool.name == "feast" %}
+      {% set has_feast = true %}
+    {% endif %}
+    {% if stage_name == "model_monitoring" and tool.name == "grafana" %}
+      {% set has_grafana = true %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
 module "cloud_sql_postgres" {
-  source = "./modules/{{ flags.first_tool_name }}/cloud/gcp/cloud_sql_postgres"
+  source = "./modules/cloud_sql_postgres"
   project_id      = var.project_id
   region          = var.region
   db_instance_name = "{{ flags.first_tool_name }}-postgres--{{ project_id }}"
   db_name         = "{{ flags.first_tool_name }}"
   db_user         = "{{ flags.first_tool_name }}"
+  create_feast_db = {{ "true" if has_feast else "false" }}
+  create_metrics_db = {{ "true" if has_grafana else "false" }}
 }
 {% endif %}
 
@@ -107,7 +141,7 @@ module "{{ stage_name }}_{{ tool.name }}" {
       image = var.{{ stage_name }}_{{ tool.name }}_image != "" ? var.{{ stage_name }}_{{ tool.name }}_image : var.global_image
     {% elif key == "artifact_bucket" %}
       # Skip - already handled above
-    {% elif key not in resource_params and key != "create_artifact_bucket" and key != "backend_store_uri" and key != "use_postgres" %}
+    {% elif key not in resource_params and key != "create_artifact_bucket" and key != "backend_store_uri" and key != "use_postgres" and key != "allow_public_access" %}
       {{ key }} = var.{{ key }}
     {% endif %}
   {% endfor %}
@@ -304,6 +338,33 @@ output "metrics_connection_string" {
 }
 output "metrics_connection_string_cloud_sql" {
   value = module.cloud_sql_postgres.metrics_connection_string_cloud_sql
+}
+{% endif %}
+
+{# Auto-teardown module #}
+{% if teardown_config and teardown_config.get("enabled", false) %}
+module "teardown" {
+  source = "./modules/teardown/cloud/gcp"
+  
+  project_id     = var.project_id
+  region         = var.region
+  workspace_name = "{{ stack_name }}"
+  
+  schedule = "{{ teardown_cron_schedule }}"
+  
+  time_zone = "{{ teardown_config.get('time_zone', 'UTC') }}"
+  terraform_state_bucket = var.terraform_state_bucket
+  terraform_files_bucket = var.terraform_files_bucket
+}
+
+output "teardown_scheduler_job" {
+  value       = module.teardown.scheduler_job_name
+  description = "Name of the Cloud Scheduler job for auto-teardown"
+}
+
+output "teardown_scheduled_at" {
+  value       = "{{ teardown_scheduled_timestamp }}"
+  description = "Unix timestamp when teardown is scheduled"
 }
 {% endif %}
 

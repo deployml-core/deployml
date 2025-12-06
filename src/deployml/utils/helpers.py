@@ -58,6 +58,7 @@ def copy_modules_to_workspace(
     stack: list | None = None,
     deployment_type: str | None = None,
     cloud: str = "gcp",
+    teardown_enabled: bool = False,
 ) -> None:
     """
     Copy only the required Terraform module templates to the workspace directory.
@@ -92,12 +93,23 @@ def copy_modules_to_workspace(
             tool_name = tool.get("name")
             if tool_name:
                 used_modules.add(tool_name)
+    
+    # Add teardown module to used_modules if teardown is enabled
+    if teardown_enabled:
+        used_modules.add("teardown")
 
     # Only copy the modules that are being used, and only the specific deployment type
     for module_path in MODULE_TEMPLATES_DIR.iterdir():
         if module_path.is_dir() and module_path.name in used_modules:
             # Special case: always copy full cloud_sql_postgres module
             if module_path.name == "cloud_sql_postgres":
+                dest_module_path = modules_dir / module_path.name
+                if dest_module_path.exists():
+                    shutil.rmtree(dest_module_path)
+                shutil.copytree(module_path, dest_module_path)
+                continue
+            # Special case: always copy full teardown module (if it exists)
+            if module_path.name == "teardown":
                 dest_module_path = modules_dir / module_path.name
                 if dest_module_path.exists():
                     shutil.rmtree(dest_module_path)

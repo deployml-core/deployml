@@ -38,6 +38,18 @@ variable "max_connections" {
   default     = "100"
 }
 
+variable "create_feast_db" {
+  description = "Whether to create the Feast database"
+  type        = bool
+  default     = false
+}
+
+variable "create_metrics_db" {
+  description = "Whether to create the Metrics database (for Grafana)"
+  type        = bool
+  default     = false
+}
+
 variable "gcp_service_list" {
   description = "The list of APIs necessary for MLflow with Cloud SQL"
   type        = list(string)
