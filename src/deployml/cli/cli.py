@@ -45,6 +45,12 @@ from deployml.utils.teardown import (
     load_deployment_metadata,
     calculate_cron_from_timestamp,
 )
+from deployml.utils.kubernetes_local import (
+    start_minikube,
+    generate_fastapi_manifests,
+    deploy_fastapi_to_minikube,
+    check_minikube_running
+)
 
 
 def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspace_name: str):
@@ -1697,6 +1703,71 @@ def init(
         )
     else:
         typer.echo(f"❌ Unknown provider: {provider}")
+        raise typer.Exit(code=1)
+
+
+@cli.command()
+def minikube_init(
+    output_dir: Path = typer.Option(
+        ..., "--output-dir", "-o", help="Directory to create Kubernetes manifests"
+    ),
+    image: str = typer.Option(
+        ..., "--image", "-i", help="FastAPI Docker image"
+    ),
+    start_cluster: bool = typer.Option(
+        True, "--start-cluster/--no-start-cluster",
+        help="Start minikube cluster if not running"
+    ),
+):
+    """
+    Initialize minikube and generate FastAPI Kubernetes manifests.
+    Creates deployment.yaml and service.yaml in the specified directory.
+    """
+    if not check_minikube_running():
+        if start_cluster:
+            if not start_minikube():
+                raise typer.Exit(code=1)
+        else:
+            typer.echo("Minikube is not running. Use --start-cluster to start it.")
+            raise typer.Exit(code=1)
+    else:
+        typer.echo("Minikube is already running")
+    
+    typer.echo(f"\nGenerating FastAPI Kubernetes manifests in {output_dir}...")
+    generate_fastapi_manifests(
+        output_dir=output_dir,
+        image=image
+    )
+    
+    typer.echo("\nSetup complete! Next steps:")
+    typer.echo(f"  1. Edit the manifests in {output_dir} if needed")
+    typer.echo(f"  2. Deploy with: deployml minikube-deploy --manifest-dir {output_dir}")
+
+
+@cli.command()
+def minikube_deploy(
+    manifest_dir: Path = typer.Option(
+        ..., "--manifest-dir", "-d",
+        help="Directory containing deployment.yaml and service.yaml"
+    ),
+):
+    """
+    Deploy FastAPI to minikube using kubectl apply.
+    """
+    if not manifest_dir.exists():
+        typer.echo(f"Directory not found: {manifest_dir}")
+        raise typer.Exit(code=1)
+    
+    if not check_minikube_running():
+        typer.echo("Minikube is not running. Start it first:")
+        typer.echo("   minikube start")
+        typer.echo("   OR")
+        typer.echo("   deployml minikube-init --start-cluster")
+        raise typer.Exit(code=1)
+    
+    success = deploy_fastapi_to_minikube(manifest_dir)
+    
+    if not success:
         raise typer.Exit(code=1)
 
 
