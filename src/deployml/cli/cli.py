@@ -49,6 +49,8 @@ from deployml.utils.kubernetes_local import (
     start_minikube,
     generate_fastapi_manifests,
     deploy_fastapi_to_minikube,
+    generate_mlflow_manifests,
+    deploy_mlflow_to_minikube,
     check_minikube_running
 )
 
@@ -1714,6 +1716,9 @@ def minikube_init(
     image: str = typer.Option(
         ..., "--image", "-i", help="FastAPI Docker image"
     ),
+    mlflow_uri: Optional[str] = typer.Option(
+        None, "--mlflow-uri", "-m", help="MLflow tracking URI (optional)"
+    ),
     start_cluster: bool = typer.Option(
         True, "--start-cluster/--no-start-cluster",
         help="Start minikube cluster if not running"
@@ -1736,7 +1741,8 @@ def minikube_init(
     typer.echo(f"\nGenerating FastAPI Kubernetes manifests in {output_dir}...")
     generate_fastapi_manifests(
         output_dir=output_dir,
-        image=image
+        image=image,
+        mlflow_tracking_uri=mlflow_uri
     )
     
     typer.echo("\nSetup complete! Next steps:")
@@ -1750,9 +1756,14 @@ def minikube_deploy(
         ..., "--manifest-dir", "-d",
         help="Directory containing deployment.yaml and service.yaml"
     ),
+    image_name: Optional[str] = typer.Option(
+        None, "--image-name", "-i",
+        help="Docker image name to load into minikube (auto-detected from deployment.yaml if not provided)"
+    ),
 ):
     """
     Deploy FastAPI to minikube using kubectl apply.
+    Automatically loads the Docker image into minikube if needed.
     """
     if not manifest_dir.exists():
         typer.echo(f"Directory not found: {manifest_dir}")
@@ -1765,7 +1776,85 @@ def minikube_deploy(
         typer.echo("   deployml minikube-init --start-cluster")
         raise typer.Exit(code=1)
     
-    success = deploy_fastapi_to_minikube(manifest_dir)
+    success = deploy_fastapi_to_minikube(manifest_dir, image_name=image_name)
+    
+    if not success:
+        raise typer.Exit(code=1)
+
+
+@cli.command()
+def mlflow_init(
+    output_dir: Path = typer.Option(
+        ..., "--output-dir", "-o", help="Directory to create Kubernetes manifests"
+    ),
+    image: str = typer.Option(
+        ..., "--image", "-i", help="MLflow Docker image"
+    ),
+    backend_store_uri: Optional[str] = typer.Option(
+        None, "--backend-store-uri", "-b", help="Backend store URI (defaults to SQLite)"
+    ),
+    artifact_root: Optional[str] = typer.Option(
+        None, "--artifact-root", "-a", help="Artifact root path (defaults to /mlflow-artifacts)"
+    ),
+    start_cluster: bool = typer.Option(
+        True, "--start-cluster/--no-start-cluster",
+        help="Start minikube cluster if not running"
+    ),
+):
+    """
+    Initialize minikube and generate MLflow Kubernetes manifests.
+    Creates deployment.yaml and service.yaml in the specified directory.
+    """
+    if not check_minikube_running():
+        if start_cluster:
+            if not start_minikube():
+                raise typer.Exit(code=1)
+        else:
+            typer.echo("Minikube is not running. Use --start-cluster to start it.")
+            raise typer.Exit(code=1)
+    else:
+        typer.echo("Minikube is already running")
+    
+    typer.echo(f"\nGenerating MLflow Kubernetes manifests in {output_dir}...")
+    generate_mlflow_manifests(
+        output_dir=output_dir,
+        image=image,
+        backend_store_uri=backend_store_uri,
+        artifact_root=artifact_root
+    )
+    
+    typer.echo("\nSetup complete! Next steps:")
+    typer.echo(f"  1. Edit the manifests in {output_dir} if needed")
+    typer.echo(f"  2. Deploy with: deployml mlflow-deploy --manifest-dir {output_dir}")
+
+
+@cli.command()
+def mlflow_deploy(
+    manifest_dir: Path = typer.Option(
+        ..., "--manifest-dir", "-d",
+        help="Directory containing deployment.yaml and service.yaml"
+    ),
+    image_name: Optional[str] = typer.Option(
+        None, "--image-name", "-i",
+        help="Docker image name to load into minikube (auto-detected from deployment.yaml if not provided)"
+    ),
+):
+    """
+    Deploy MLflow to minikube using kubectl apply.
+    Automatically loads the Docker image into minikube if needed.
+    """
+    if not manifest_dir.exists():
+        typer.echo(f"Directory not found: {manifest_dir}")
+        raise typer.Exit(code=1)
+    
+    if not check_minikube_running():
+        typer.echo("Minikube is not running. Start it first:")
+        typer.echo("   minikube start")
+        typer.echo("   OR")
+        typer.echo("   deployml mlflow-init --start-cluster")
+        raise typer.Exit(code=1)
+    
+    success = deploy_mlflow_to_minikube(manifest_dir, image_name=image_name)
     
     if not success:
         raise typer.Exit(code=1)
