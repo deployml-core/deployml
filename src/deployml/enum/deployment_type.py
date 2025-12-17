@@ -10,3 +10,4 @@ class DeploymentType(Enum):
     DOCKER = "docker"
     CLOUD_RUN = "cloud_run"
     CLOUD_VM = "cloud_vm"
+    GKE = "gke"
