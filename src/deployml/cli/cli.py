@@ -784,6 +784,111 @@ def deploy(
     deployment_type = config["deployment"]["type"]
     stack = config["stack"]
 
+    # Handle GKE deployment type (Kubernetes manifests, not Terraform)
+    if deployment_type == "gke":
+        typer.echo("🚀 GKE deployment detected")
+        typer.echo("   Using Kubernetes manifests (similar to minikube)")
+        typer.echo("   Images will be pushed to GCR")
+        
+        # Extract GKE-specific config
+        gke_config = config.get("gke", {})
+        cluster_name = gke_config.get("cluster_name")
+        zone = gke_config.get("zone")
+        region_gke = gke_config.get("region")
+        
+        if not cluster_name:
+            typer.echo("❌ GKE cluster_name must be specified in config.gke.cluster_name")
+            raise typer.Exit(code=1)
+        
+        if not zone and not region_gke:
+            typer.echo("❌ Either config.gke.zone or config.gke.region must be specified")
+            raise typer.Exit(code=1)
+        
+        typer.echo(f"   Cluster: {cluster_name}")
+        typer.echo(f"   Location: {zone or region_gke}")
+        
+        # Create manifests directory
+        manifests_dir = DEPLOYML_DIR / "manifests"
+        manifests_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate Kubernetes manifests for each service in stack
+        from deployml.utils.kubernetes_gke import (
+            generate_mlflow_manifests_gke,
+            generate_fastapi_manifests_gke,
+            deploy_to_gke,
+            connect_to_gke_cluster,
+        )
+        
+        # Connect to GKE cluster
+        if not connect_to_gke_cluster(project_id, cluster_name, zone, region_gke):
+            raise typer.Exit(code=1)
+        
+        # Process stack and generate manifests
+        mlflow_manifest_dir = None
+        fastapi_manifest_dir = None
+        
+        for stage in stack:
+            for stage_name, tool in stage.items():
+                if stage_name == "experiment_tracking" and tool.get("name") == "mlflow":
+                    params = tool.get("params", {})
+                    image = params.get("image", f"gcr.io/{project_id}/mlflow/mlflow:latest")
+                    backend_uri = params.get("backend_store_uri", "sqlite:///mlflow.db")
+                    artifact_root = params.get("artifact_root")
+                    
+                    mlflow_manifest_dir = manifests_dir / "mlflow"
+                    typer.echo(f"\n📦 Generating MLflow manifests...")
+                    generate_mlflow_manifests_gke(
+                        output_dir=mlflow_manifest_dir,
+                        image=image,
+                        project_id=project_id,
+                        backend_store_uri=backend_uri,
+                        artifact_root=artifact_root,
+                        push_image=not image.startswith("gcr.io/"),
+                    )
+                
+                elif stage_name == "model_serving" and tool.get("name") == "fastapi":
+                    params = tool.get("params", {})
+                    image = params.get("image", f"gcr.io/{project_id}/fastapi/fastapi:latest")
+                    mlflow_uri = params.get("mlflow_tracking_uri", "http://mlflow-service:5000")
+                    
+                    fastapi_manifest_dir = manifests_dir / "fastapi"
+                    typer.echo(f"\n📦 Generating FastAPI manifests...")
+                    generate_fastapi_manifests_gke(
+                        output_dir=fastapi_manifest_dir,
+                        image=image,
+                        project_id=project_id,
+                        mlflow_tracking_uri=mlflow_uri,
+                        push_image=not image.startswith("gcr.io/"),
+                    )
+        
+        # Deploy manifests
+        if mlflow_manifest_dir and mlflow_manifest_dir.exists():
+            typer.echo(f"\n🚀 Deploying MLflow to GKE...")
+            if not deploy_to_gke(
+                manifest_dir=mlflow_manifest_dir,
+                cluster_name=cluster_name,
+                project_id=project_id,
+                zone=zone,
+                region=region_gke,
+            ):
+                raise typer.Exit(code=1)
+        
+        if fastapi_manifest_dir and fastapi_manifest_dir.exists():
+            typer.echo(f"\n🚀 Deploying FastAPI to GKE...")
+            if not deploy_to_gke(
+                manifest_dir=fastapi_manifest_dir,
+                cluster_name=cluster_name,
+                project_id=project_id,
+                zone=zone,
+                region=region_gke,
+            ):
+                raise typer.Exit(code=1)
+        
+        typer.echo("\n✅ GKE deployment complete!")
+        typer.echo(f"📁 Manifests saved to: {manifests_dir}")
+        return
+    
+    # Continue with Terraform-based deployments (cloud_run, cloud_vm)
     # --- PATCH: Ensure cloud_sql_postgres module is copied for mlflow cloud_run with postgres ---
     if (
         cloud == "gcp"
