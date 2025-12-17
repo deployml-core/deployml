@@ -1,0 +1,26 @@
+name: gke-mlflow-test
+provider:
+  name: gcp
+  project_id: mldeploy-468919  # ← Updated from terminal
+  region: us-west1
+
+deployment:
+  type: gke
+
+gke:
+  cluster_name: my-gke-cluster  # ← Updated from terminal
+  zone: us-west1-a  # ← Updated from terminal
+
+stack:
+  # MLflow already deployed - commenting out
+  # - experiment_tracking:
+  #     name: mlflow
+  #     params:
+  #       image: mlflow-demo:latest
+  #       backend_store_uri: sqlite:///mlflow.db
+  
+  - model_serving:
+      name: fastapi
+      params:
+        image: fastapi-mlflow-demo:latest
+        mlflow_tracking_uri: http://mlflow-service:5000

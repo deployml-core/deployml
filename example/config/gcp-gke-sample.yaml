@@ -1,0 +1,46 @@
+name: gcp-mlops-stack-mlflow-gke
+provider:
+  name: gcp
+  project_id: YOUR_PROJECT_ID
+  region: us-west1
+
+deployment:
+  type: gke
+
+gke:
+  cluster_name: my-gke-cluster
+  zone: us-west1-a  # For zonal cluster
+  # OR use region for regional cluster:
+  # region: us-west1
+
+stack:
+  - experiment_tracking:
+      name: mlflow
+      params:
+        image: mlflow-demo:latest  # Local image name, will be pushed to GCR
+        service_name: mlflow-service
+        service_type: LoadBalancer
+        memory_limit: 2Gi
+        cpu_limit: 1000m
+        backend_store_uri: postgresql  # or sqlite:///mlflow.db
+  
+  - artifact_tracking:
+      name: mlflow
+      params:
+        artifact_bucket: mlflow-artifacts-bucket
+        create_artifact_bucket: true
+  
+  - model_registry:
+      name: mlflow
+      params:
+        backend_store_uri: postgresql
+  
+  - model_serving:
+      name: fastapi
+      params:
+        image: fastapi-mlflow-demo:latest  # Local image name
+        service_name: fastapi-service
+        service_type: LoadBalancer
+        mlflow_tracking_uri: http://mlflow-service:5000
+        memory_limit: 1Gi
+        cpu_limit: 1000m
