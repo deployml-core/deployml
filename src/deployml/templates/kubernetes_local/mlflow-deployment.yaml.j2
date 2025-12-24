@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-deployment
+  labels:
+    app: mlflow
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      containers:
+      - name: mlflow
+        image: {{ image }}
+        imagePullPolicy: Never
+        ports:
+        - containerPort: {{ port }}
+        env:
+        - name: MLFLOW_SERVER_HOST
+          value: "0.0.0.0"
+        - name: MLFLOW_SERVER_PORT
+          value: "{{ port }}"
+        {% if backend_store_uri %}
+        - name: MLFLOW_BACKEND_STORE_URI
+          value: "{{ backend_store_uri }}"
+        {% endif %}
+        command: 
+        - "mlflow"
+        - "server"
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "{{ port }}"
+        - "--backend-store-uri"
+        - "{{ backend_store_uri | default('sqlite:///mlflow.db') }}"
+        - "--artifacts-destination"
+        - "/mlflow-artifacts"
+        - "--serve-artifacts"
+        resources:
+          requests:
+            memory: "{{ memory_request }}"
+            cpu: "{{ cpu_request }}"
+          limits:
+            memory: "{{ memory_limit }}"
+            cpu: "{{ cpu_limit }}"
+        volumeMounts:
+        - name: mlflow-data
+          mountPath: /mlflow-artifacts
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{ port }}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: {{ port }}
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: mlflow-data
+        emptyDir: {}
+

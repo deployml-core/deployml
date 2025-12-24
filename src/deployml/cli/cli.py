@@ -45,6 +45,20 @@ from deployml.utils.teardown import (
     load_deployment_metadata,
     calculate_cron_from_timestamp,
 )
+from deployml.utils.kubernetes_local import (
+    start_minikube,
+    generate_fastapi_manifests,
+    deploy_fastapi_to_minikube,
+    generate_mlflow_manifests,
+    deploy_mlflow_to_minikube,
+    check_minikube_running
+)
+from deployml.utils.kubernetes_gke import (
+    generate_mlflow_manifests_gke,
+    generate_fastapi_manifests_gke,
+    deploy_to_gke,
+    connect_to_gke_cluster,
+)
 
 
 def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspace_name: str):
@@ -709,6 +723,9 @@ def deploy(
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip confirmation prompts and deploy"
     ),
+    generate_only: bool = typer.Option(
+        False, "--generate-only", "-g", help="Only generate manifests, do not apply (for GKE deployments)"
+    ),
 ):
     """
     Deploy infrastructure based on a YAML configuration file.
@@ -770,6 +787,111 @@ def deploy(
     deployment_type = config["deployment"]["type"]
     stack = config["stack"]
 
+    # Handle GKE deployment type (Kubernetes manifests, not Terraform)
+    if deployment_type == "gke":
+        typer.echo("🚀 GKE deployment detected")
+        typer.echo("   Using Kubernetes manifests (similar to minikube)")
+        typer.echo("   Images will be pushed to GCR")
+        
+        # Extract GKE-specific config
+        gke_config = config.get("gke", {})
+        cluster_name = gke_config.get("cluster_name")
+        zone = gke_config.get("zone")
+        region_gke = gke_config.get("region")
+        
+        if not cluster_name:
+            typer.echo("❌ GKE cluster_name must be specified in config.gke.cluster_name")
+            raise typer.Exit(code=1)
+        
+        if not zone and not region_gke:
+            typer.echo("❌ Either config.gke.zone or config.gke.region must be specified")
+            raise typer.Exit(code=1)
+        
+        typer.echo(f"   Cluster: {cluster_name}")
+        typer.echo(f"   Location: {zone or region_gke}")
+        
+        # Create manifests directory
+        manifests_dir = DEPLOYML_DIR / "manifests"
+        manifests_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate Kubernetes manifests for each service in stack
+        from deployml.utils.kubernetes_gke import (
+            generate_mlflow_manifests_gke,
+            generate_fastapi_manifests_gke,
+            deploy_to_gke,
+            connect_to_gke_cluster,
+        )
+        
+        # Connect to GKE cluster
+        if not connect_to_gke_cluster(project_id, cluster_name, zone, region_gke):
+            raise typer.Exit(code=1)
+        
+        # Process stack and generate manifests
+        mlflow_manifest_dir = None
+        fastapi_manifest_dir = None
+        
+        for stage in stack:
+            for stage_name, tool in stage.items():
+                if stage_name == "experiment_tracking" and tool.get("name") == "mlflow":
+                    params = tool.get("params", {})
+                    image = params.get("image", f"gcr.io/{project_id}/mlflow/mlflow:latest")
+                    backend_uri = params.get("backend_store_uri", "sqlite:///mlflow.db")
+                    artifact_root = params.get("artifact_root")
+                    
+                    mlflow_manifest_dir = manifests_dir / "mlflow"
+                    typer.echo(f"\n📦 Generating MLflow manifests...")
+                    generate_mlflow_manifests_gke(
+                        output_dir=mlflow_manifest_dir,
+                        image=image,
+                        project_id=project_id,
+                        backend_store_uri=backend_uri,
+                        artifact_root=artifact_root,
+                        push_image=not image.startswith("gcr.io/"),
+                    )
+                
+                elif stage_name == "model_serving" and tool.get("name") == "fastapi":
+                    params = tool.get("params", {})
+                    image = params.get("image", f"gcr.io/{project_id}/fastapi/fastapi:latest")
+                    mlflow_uri = params.get("mlflow_tracking_uri", "http://mlflow-service:5000")
+                    
+                    fastapi_manifest_dir = manifests_dir / "fastapi"
+                    typer.echo(f"\n📦 Generating FastAPI manifests...")
+                    generate_fastapi_manifests_gke(
+                        output_dir=fastapi_manifest_dir,
+                        image=image,
+                        project_id=project_id,
+                        mlflow_tracking_uri=mlflow_uri,
+                        push_image=not image.startswith("gcr.io/"),
+                    )
+        
+        # Deploy manifests
+        if mlflow_manifest_dir and mlflow_manifest_dir.exists():
+            typer.echo(f"\n🚀 Deploying MLflow to GKE...")
+            if not deploy_to_gke(
+                manifest_dir=mlflow_manifest_dir,
+                cluster_name=cluster_name,
+                project_id=project_id,
+                zone=zone,
+                region=region_gke,
+            ):
+                raise typer.Exit(code=1)
+        
+        if fastapi_manifest_dir and fastapi_manifest_dir.exists():
+            typer.echo(f"\n🚀 Deploying FastAPI to GKE...")
+            if not deploy_to_gke(
+                manifest_dir=fastapi_manifest_dir,
+                cluster_name=cluster_name,
+                project_id=project_id,
+                zone=zone,
+                region=region_gke,
+            ):
+                raise typer.Exit(code=1)
+        
+        typer.echo("\n✅ GKE deployment complete!")
+        typer.echo(f"📁 Manifests saved to: {manifests_dir}")
+        return
+    
+    # Continue with Terraform-based deployments (cloud_run, cloud_vm)
     # --- PATCH: Ensure cloud_sql_postgres module is copied for mlflow cloud_run with postgres ---
     if (
         cloud == "gcp"
@@ -1698,6 +1820,354 @@ def init(
     else:
         typer.echo(f"❌ Unknown provider: {provider}")
         raise typer.Exit(code=1)
+
+
+@cli.command()
+def minikube_init(
+    output_dir: Path = typer.Option(
+        ..., "--output-dir", "-o", help="Directory to create Kubernetes manifests"
+    ),
+    image: str = typer.Option(
+        ..., "--image", "-i", help="FastAPI Docker image"
+    ),
+    mlflow_uri: Optional[str] = typer.Option(
+        None, "--mlflow-uri", "-m", help="MLflow tracking URI (optional)"
+    ),
+    start_cluster: bool = typer.Option(
+        True, "--start-cluster/--no-start-cluster",
+        help="Start minikube cluster if not running"
+    ),
+):
+    """
+    Initialize minikube and generate FastAPI Kubernetes manifests.
+    Creates deployment.yaml and service.yaml in the specified directory.
+    """
+    if not check_minikube_running():
+        if start_cluster:
+            if not start_minikube():
+                raise typer.Exit(code=1)
+        else:
+            typer.echo("Minikube is not running. Use --start-cluster to start it.")
+            raise typer.Exit(code=1)
+    else:
+        typer.echo("Minikube is already running")
+    
+    typer.echo(f"\nGenerating FastAPI Kubernetes manifests in {output_dir}...")
+    generate_fastapi_manifests(
+        output_dir=output_dir,
+        image=image,
+        mlflow_tracking_uri=mlflow_uri
+    )
+    
+    typer.echo("\nSetup complete! Next steps:")
+    typer.echo(f"  1. Edit the manifests in {output_dir} if needed")
+    typer.echo(f"  2. Deploy with: deployml minikube-deploy --manifest-dir {output_dir}")
+
+
+@cli.command()
+def minikube_deploy(
+    manifest_dir: Path = typer.Option(
+        ..., "--manifest-dir", "-d",
+        help="Directory containing deployment.yaml and service.yaml"
+    ),
+    image_name: Optional[str] = typer.Option(
+        None, "--image-name", "-i",
+        help="Docker image name to load into minikube (auto-detected from deployment.yaml if not provided)"
+    ),
+):
+    """
+    Deploy FastAPI to minikube using kubectl apply.
+    Automatically loads the Docker image into minikube if needed.
+    """
+    if not manifest_dir.exists():
+        typer.echo(f"Directory not found: {manifest_dir}")
+        raise typer.Exit(code=1)
+    
+    if not check_minikube_running():
+        typer.echo("Minikube is not running. Start it first:")
+        typer.echo("   minikube start")
+        typer.echo("   OR")
+        typer.echo("   deployml minikube-init --start-cluster")
+        raise typer.Exit(code=1)
+    
+    success = deploy_fastapi_to_minikube(manifest_dir, image_name=image_name)
+    
+    if not success:
+        raise typer.Exit(code=1)
+
+
+@cli.command()
+def mlflow_init(
+    output_dir: Path = typer.Option(
+        ..., "--output-dir", "-o", help="Directory to create Kubernetes manifests"
+    ),
+    image: str = typer.Option(
+        ..., "--image", "-i", help="MLflow Docker image"
+    ),
+    backend_store_uri: Optional[str] = typer.Option(
+        None, "--backend-store-uri", "-b", help="Backend store URI (defaults to SQLite)"
+    ),
+    artifact_root: Optional[str] = typer.Option(
+        None, "--artifact-root", "-a", help="Artifact root path (defaults to /mlflow-artifacts)"
+    ),
+    start_cluster: bool = typer.Option(
+        True, "--start-cluster/--no-start-cluster",
+        help="Start minikube cluster if not running"
+    ),
+):
+    """
+    Initialize minikube and generate MLflow Kubernetes manifests.
+    Creates deployment.yaml and service.yaml in the specified directory.
+    """
+    if not check_minikube_running():
+        if start_cluster:
+            if not start_minikube():
+                raise typer.Exit(code=1)
+        else:
+            typer.echo("Minikube is not running. Use --start-cluster to start it.")
+            raise typer.Exit(code=1)
+    else:
+        typer.echo("Minikube is already running")
+    
+    typer.echo(f"\nGenerating MLflow Kubernetes manifests in {output_dir}...")
+    generate_mlflow_manifests(
+        output_dir=output_dir,
+        image=image,
+        backend_store_uri=backend_store_uri,
+        artifact_root=artifact_root
+    )
+    
+    typer.echo("\nSetup complete! Next steps:")
+    typer.echo(f"  1. Edit the manifests in {output_dir} if needed")
+    typer.echo(f"  2. Deploy with: deployml mlflow-deploy --manifest-dir {output_dir}")
+
+
+@cli.command()
+def mlflow_deploy(
+    manifest_dir: Path = typer.Option(
+        ..., "--manifest-dir", "-d",
+        help="Directory containing deployment.yaml and service.yaml"
+    ),
+    image_name: Optional[str] = typer.Option(
+        None, "--image-name", "-i",
+        help="Docker image name to load into minikube (auto-detected from deployment.yaml if not provided)"
+    ),
+):
+    """
+    Deploy MLflow to minikube using kubectl apply.
+    Automatically loads the Docker image into minikube if needed.
+    """
+    if not manifest_dir.exists():
+        typer.echo(f"Directory not found: {manifest_dir}")
+        raise typer.Exit(code=1)
+    
+    if not check_minikube_running():
+        typer.echo("Minikube is not running. Start it first:")
+        typer.echo("   minikube start")
+        typer.echo("   OR")
+        typer.echo("   deployml mlflow-init --start-cluster")
+        raise typer.Exit(code=1)
+    
+    success = deploy_mlflow_to_minikube(manifest_dir, image_name=image_name)
+    
+    if not success:
+        raise typer.Exit(code=1)
+
+
+@cli.command()
+def gke_deploy(
+    manifest_dir: Path = typer.Option(
+        ..., "--manifest-dir", "-d",
+        help="Directory containing deployment.yaml and service.yaml"
+    ),
+    cluster: str = typer.Option(
+        ..., "--cluster", "-c", help="GKE cluster name"
+    ),
+    project: str = typer.Option(
+        ..., "--project", "-p", help="GCP project ID"
+    ),
+    zone: Optional[str] = typer.Option(
+        None, "--zone", "-z", help="GKE cluster zone"
+    ),
+    region: Optional[str] = typer.Option(
+        None, "--region", "-r", help="GKE cluster region"
+    ),
+):
+    """
+    Deploy Kubernetes manifests to GKE cluster.
+    Simple command: just point to manifests and cluster info.
+    """
+    if not manifest_dir.exists():
+        typer.echo(f"Directory not found: {manifest_dir}")
+        raise typer.Exit(code=1)
+    
+    if not zone and not region:
+        typer.echo("Either --zone or --region must be provided")
+        raise typer.Exit(code=1)
+    
+    success = deploy_to_gke(
+        manifest_dir=manifest_dir,
+        cluster_name=cluster,
+        project_id=project,
+        zone=zone,
+        region=region,
+    )
+    
+    if not success:
+        raise typer.Exit(code=1)
+
+
+@cli.command()
+def gke_init(
+    output_dir: Path = typer.Option(
+        ..., "--output-dir", "-o", help="Directory to create Kubernetes manifests"
+    ),
+    image: str = typer.Option(
+        ..., "--image", "-i", help="Docker image name (local or GCR)"
+    ),
+    project: str = typer.Option(
+        ..., "--project", "-p", help="GCP project ID"
+    ),
+    service: str = typer.Option(
+        "mlflow", "--service", "-s", help="Service type: mlflow or fastapi"
+    ),
+    mlflow_uri: Optional[str] = typer.Option(
+        None, "--mlflow-uri", "-m", help="MLflow URI (for FastAPI)"
+    ),
+):
+    """
+    Generate Kubernetes manifests for GKE.
+    Simple command: specify image, project, and service type.
+    """
+    if service == "mlflow":
+        generate_mlflow_manifests_gke(
+            output_dir=output_dir,
+            image=image,
+            project_id=project,
+            push_image=not image.startswith("gcr.io/"),
+        )
+        typer.echo(f"\nNext: deployml gke-deploy -d {output_dir} -c CLUSTER -p {project} -z ZONE")
+    elif service == "fastapi":
+        generate_fastapi_manifests_gke(
+            output_dir=output_dir,
+            image=image,
+            project_id=project,
+            mlflow_tracking_uri=mlflow_uri,
+            push_image=not image.startswith("gcr.io/"),
+        )
+        typer.echo(f"\nNext: deployml gke-deploy -d {output_dir} -c CLUSTER -p {project} -z ZONE")
+    else:
+        typer.echo(f"Unknown service: {service}. Use 'mlflow' or 'fastapi'")
+        raise typer.Exit(code=1)
+
+
+@cli.command()
+def gke_apply(
+    config_path: Path = typer.Option(
+        ..., "--config-path", "-c", help="Path to YAML config file"
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip confirmation prompts and apply"
+    ),
+):
+    """
+    Apply Kubernetes manifests to GKE cluster.
+    Manifests must be generated first using 'deployml deploy --config-path <config> --generate-only'.
+    """
+    if not config_path.exists():
+        typer.echo(f"Config file not found: {config_path}")
+        raise typer.Exit(code=1)
+
+    config = yaml.safe_load(config_path.read_text())
+    
+    # Validate deployment type
+    deployment_type = config.get("deployment", {}).get("type")
+    if deployment_type != "gke":
+        typer.echo(f"This command is only for GKE deployments. Found: {deployment_type}")
+        raise typer.Exit(code=1)
+    
+    workspace_name = config.get("name") or "development"
+    DEPLOYML_DIR = Path.cwd() / ".deployml" / workspace_name
+    manifests_dir = DEPLOYML_DIR / "manifests"
+    
+    if not manifests_dir.exists():
+        typer.echo(f"Manifests directory not found: {manifests_dir}")
+        typer.echo("   Generate manifests first with: deployml deploy --config-path <config> --generate-only")
+        raise typer.Exit(code=1)
+    
+    # Extract GKE-specific config
+    project_id = config["provider"]["project_id"]
+    gke_config = config.get("gke", {})
+    cluster_name = gke_config.get("cluster_name")
+    zone = gke_config.get("zone")
+    region_gke = gke_config.get("region")
+    
+    if not cluster_name:
+        typer.echo("GKE cluster_name must be specified in config.gke.cluster_name")
+        raise typer.Exit(code=1)
+    
+    if not zone and not region_gke:
+        typer.echo("Either config.gke.zone or config.gke.region must be specified")
+        raise typer.Exit(code=1)
+    
+    typer.echo(f"🚀 Applying GKE manifests")
+    typer.echo(f"   Cluster: {cluster_name}")
+    typer.echo(f"   Location: {zone or region_gke}")
+    typer.echo(f"   Manifests: {manifests_dir}")
+    
+    # Import deployment function
+    from deployml.utils.kubernetes_gke import (
+        deploy_to_gke,
+        connect_to_gke_cluster,
+    )
+    
+    # Connect to GKE cluster
+    if not connect_to_gke_cluster(project_id, cluster_name, zone, region_gke):
+        raise typer.Exit(code=1)
+    
+    # Find and deploy all manifest directories
+    mlflow_manifest_dir = manifests_dir / "mlflow"
+    fastapi_manifest_dir = manifests_dir / "fastapi"
+    
+    if not yes:
+        typer.echo("\n About to apply manifests to GKE cluster")
+        if not typer.confirm("Continue?"):
+            typer.echo("Deployment cancelled")
+            return
+    
+    deployed_any = False
+    
+    if mlflow_manifest_dir.exists():
+        typer.echo(f"\n Deploying MLflow to GKE...")
+        if deploy_to_gke(
+            manifest_dir=mlflow_manifest_dir,
+            cluster_name=cluster_name,
+            project_id=project_id,
+            zone=zone,
+            region=region_gke,
+        ):
+            deployed_any = True
+        else:
+            raise typer.Exit(code=1)
+    
+    if fastapi_manifest_dir.exists():
+        typer.echo(f"\n Deploying FastAPI to GKE...")
+        if deploy_to_gke(
+            manifest_dir=fastapi_manifest_dir,
+            cluster_name=cluster_name,
+            project_id=project_id,
+            zone=zone,
+            region=region_gke,
+        ):
+            deployed_any = True
+        else:
+            raise typer.Exit(code=1)
+    
+    if deployed_any:
+        typer.echo("\n GKE deployment complete!")
+    else:
+        typer.echo("\n No manifests found to deploy")
+        typer.echo(f"   Check: {manifests_dir}")
 
 
 def main():

@@ -26,3 +26,5 @@ mlflow.db
 # Ignore .env file
 .venv/
 .env/
+
+demo

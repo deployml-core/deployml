@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-deployment
+  labels:
+    app: fastapi
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: fastapi
+  template:
+    metadata:
+      labels:
+        app: fastapi
+    spec:
+      containers:
+      - name: fastapi
+        image: {{ image }}
+        imagePullPolicy: Never
+        ports:
+        - containerPort: {{ port }}
+        env:
+        - name: FASTAPI_PORT
+          value: "{{ port }}"
+        {% if mlflow_tracking_uri %}
+        - name: MLFLOW_TRACKING_URI
+          value: "{{ mlflow_tracking_uri }}"
+        {% endif %}
+        resources:
+          requests:
+            memory: "{{ memory_request }}"
+            cpu: "{{ cpu_request }}"
+          limits:
+            memory: "{{ memory_limit }}"
+            cpu: "{{ cpu_limit }}"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{ port }}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: {{ port }}
+          initialDelaySeconds: 10
+          periodSeconds: 5
