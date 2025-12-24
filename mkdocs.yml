@@ -68,8 +68,11 @@ nav:
   - Cost Estimates: features/costs.md
 - Tutorials:
   - Overview: tutorials/overview.md
-  - GCP: tutorials/gcp.md
-  - AWS: tutorials/aws.md
+  - GCP Cloud Run: tutorials/gcp-cloud-run.md
+  - GCP Cloud VM: tutorials/gcp-cloud-vm.md
+  - GKE Deployment: tutorials/gke-deployment.md
+  - Minikube: tutorials/minikube.md
 - API Reference:
   - Overview: api/overview.md
+  - CLI Commands: api/cli-commands.md
 - FAQ: faq.md
