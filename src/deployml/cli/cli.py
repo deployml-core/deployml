@@ -2075,7 +2075,7 @@ def gke_apply(
     Manifests must be generated first using 'deployml deploy --config-path <config> --generate-only'.
     """
     if not config_path.exists():
-        typer.echo(f"❌ Config file not found: {config_path}")
+        typer.echo(f"Config file not found: {config_path}")
         raise typer.Exit(code=1)
 
     config = yaml.safe_load(config_path.read_text())
@@ -2083,7 +2083,7 @@ def gke_apply(
     # Validate deployment type
     deployment_type = config.get("deployment", {}).get("type")
     if deployment_type != "gke":
-        typer.echo(f"❌ This command is only for GKE deployments. Found: {deployment_type}")
+        typer.echo(f"This command is only for GKE deployments. Found: {deployment_type}")
         raise typer.Exit(code=1)
     
     workspace_name = config.get("name") or "development"
@@ -2091,7 +2091,7 @@ def gke_apply(
     manifests_dir = DEPLOYML_DIR / "manifests"
     
     if not manifests_dir.exists():
-        typer.echo(f"❌ Manifests directory not found: {manifests_dir}")
+        typer.echo(f"Manifests directory not found: {manifests_dir}")
         typer.echo("   Generate manifests first with: deployml deploy --config-path <config> --generate-only")
         raise typer.Exit(code=1)
     
@@ -2103,11 +2103,11 @@ def gke_apply(
     region_gke = gke_config.get("region")
     
     if not cluster_name:
-        typer.echo("❌ GKE cluster_name must be specified in config.gke.cluster_name")
+        typer.echo("GKE cluster_name must be specified in config.gke.cluster_name")
         raise typer.Exit(code=1)
     
     if not zone and not region_gke:
-        typer.echo("❌ Either config.gke.zone or config.gke.region must be specified")
+        typer.echo("Either config.gke.zone or config.gke.region must be specified")
         raise typer.Exit(code=1)
     
     typer.echo(f"🚀 Applying GKE manifests")
@@ -2130,15 +2130,15 @@ def gke_apply(
     fastapi_manifest_dir = manifests_dir / "fastapi"
     
     if not yes:
-        typer.echo("\n⚠️  About to apply manifests to GKE cluster")
+        typer.echo("\n About to apply manifests to GKE cluster")
         if not typer.confirm("Continue?"):
-            typer.echo("❌ Deployment cancelled")
+            typer.echo("Deployment cancelled")
             return
     
     deployed_any = False
     
     if mlflow_manifest_dir.exists():
-        typer.echo(f"\n🚀 Deploying MLflow to GKE...")
+        typer.echo(f"\n Deploying MLflow to GKE...")
         if deploy_to_gke(
             manifest_dir=mlflow_manifest_dir,
             cluster_name=cluster_name,
@@ -2151,7 +2151,7 @@ def gke_apply(
             raise typer.Exit(code=1)
     
     if fastapi_manifest_dir.exists():
-        typer.echo(f"\n🚀 Deploying FastAPI to GKE...")
+        typer.echo(f"\n Deploying FastAPI to GKE...")
         if deploy_to_gke(
             manifest_dir=fastapi_manifest_dir,
             cluster_name=cluster_name,
@@ -2164,9 +2164,9 @@ def gke_apply(
             raise typer.Exit(code=1)
     
     if deployed_any:
-        typer.echo("\n✅ GKE deployment complete!")
+        typer.echo("\n GKE deployment complete!")
     else:
-        typer.echo("\n⚠️  No manifests found to deploy")
+        typer.echo("\n No manifests found to deploy")
         typer.echo(f"   Check: {manifests_dir}")
 
 
