@@ -6,10 +6,10 @@ Deploy MLflow to Google Cloud VM using deployml.
 
 Cloud VM deployment provides persistent storage and full control over your infrastructure. It's ideal for:
 
-- ✅ Persistent storage
-- ✅ Full control
-- ✅ Cost-effective for long-running services
-- ✅ Custom configurations
+- Persistent storage
+- Full control
+- Cost-effective for long-running services
+- Custom configurations
 
 ## Quick Start
 

@@ -5,27 +5,27 @@ Learn how to deploy MLflow and FastAPI using deployml.
 ## Deployment Options
 
 ### Cloud Run (Serverless)
-- ✅ Automatic scaling
-- ✅ Pay per use
-- ✅ No infrastructure management
+- Automatic scaling
+- Pay per use
+- No infrastructure management
 - [Get Started →](gcp-cloud-run.md)
 
 ### GKE (Kubernetes)
-- ✅ Production-ready
-- ✅ Full control
-- ✅ Custom configurations
+- Production-ready
+- Full control
+- Custom configurations
 - [Get Started →](gke-deployment.md)
 
 ### Cloud VM
-- ✅ Persistent storage
-- ✅ Full control
-- ✅ Cost-effective for long-running services
+- Persistent storage
+- Full control
+- Cost-effective for long-running services
 - [Get Started →](gcp-cloud-vm.md)
 
 ### Minikube (Local)
-- ✅ Local testing
-- ✅ No cloud costs
-- ✅ Fast iteration
+- Local testing
+- No cloud costs
+- Fast iteration
 - [Get Started →](minikube.md)
 
 ## Quick Start

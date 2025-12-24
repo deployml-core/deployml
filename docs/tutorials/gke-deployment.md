@@ -52,9 +52,9 @@ gcloud container clusters list --project YOUR_PROJECT_ID
 ```
 
 **Note:** If you have an existing company kubeconfig:
-- ✅ **No manual setup needed** - `deployml deploy` handles everything automatically
-- ✅ **Your company kubeconfig is safe** - `gcloud get-credentials` adds a new context, it doesn't delete existing ones
-- ⚠️ **Context switching** - After deployment, kubectl will point to the GKE cluster. To switch back:
+- **No manual setup needed** - `deployml deploy` handles everything automatically
+- **Your company kubeconfig is safe** - `gcloud get-credentials` adds a new context, it doesn't delete existing ones
+- **Context switching** - After deployment, kubectl will point to the GKE cluster. To switch back:
   ```bash
   kubectl config use-context YOUR_COMPANY_CONTEXT_NAME
   ```
@@ -195,11 +195,11 @@ kubectl apply -f .deployml/gke-mlflow-fastapi/manifests/fastapi/
 ```
 
 **Benefits of Two-Step Workflow:**
-- ✅ Review manifests before deployment
-- ✅ Edit resource limits, replicas, or environment variables
-- ✅ Version control manifests
-- ✅ Apply changes incrementally
-- ✅ Debug issues before deployment
+- Review manifests before deployment
+- Edit resource limits, replicas, or environment variables
+- Version control manifests
+- Apply changes incrementally
+- Debug issues before deployment
 
 ## Verify Deployment
 

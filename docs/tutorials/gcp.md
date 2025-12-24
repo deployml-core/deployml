@@ -8,9 +8,9 @@ DeployML supports multiple deployment types on Google Cloud Platform.
 Serverless container deployment for MLflow and FastAPI services.
 
 **Features:**
-- ✅ Automatic scaling
-- ✅ Pay per use
-- ✅ No infrastructure management
+- Automatic scaling
+- Pay per use
+- No infrastructure management
 
 [Get Started →](gcp-cloud-run.md)
 
@@ -18,10 +18,10 @@ Serverless container deployment for MLflow and FastAPI services.
 Kubernetes-based deployment for production workloads.
 
 **Features:**
-- ✅ Production-ready
-- ✅ Full control
-- ✅ Custom configurations
-- ✅ Two-step workflow (generate manifests, then apply)
+- Production-ready
+- Full control
+- Custom configurations
+- Two-step workflow (generate manifests, then apply)
 
 [Get Started →](gke-deployment.md)
 
@@ -29,9 +29,9 @@ Kubernetes-based deployment for production workloads.
 Virtual machine deployment for MLflow and other services.
 
 **Features:**
-- ✅ Persistent storage
-- ✅ Full control
-- ✅ Cost-effective for long-running services
+- Persistent storage
+- Full control
+- Cost-effective for long-running services
 
 [Get Started →](gcp-cloud-vm.md)
 

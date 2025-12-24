@@ -6,10 +6,10 @@ Deploy MLflow and FastAPI to Google Cloud Run using deployml.
 
 Cloud Run is a serverless container platform that automatically scales your applications. It's ideal for:
 
-- ✅ Automatic scaling
-- ✅ Pay per use
-- ✅ No infrastructure management
-- ✅ Fast deployment
+- Automatic scaling
+- Pay per use
+- No infrastructure management
+- Fast deployment
 
 ## Quick Start
 
@@ -71,8 +71,8 @@ deployml deploy --config-path cloud-run-config.yaml
 After deployment, you'll see URLs like:
 
 ```
-✅ MLflow URL: https://mlflow-server-xxxxx-uw.a.run.app
-✅ FastAPI URL: https://fastapi-server-xxxxx-uw.a.run.app
+MLflow URL: https://mlflow-server-xxxxx-uw.a.run.app
+FastAPI URL: https://fastapi-server-xxxxx-uw.a.run.app
 ```
 
 ## Configuration Options

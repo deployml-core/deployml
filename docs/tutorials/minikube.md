@@ -6,10 +6,10 @@ Deploy MLflow and FastAPI locally using Minikube for testing and development.
 
 Minikube provides a local Kubernetes environment for testing and development. It's ideal for:
 
-- ✅ Local testing
-- ✅ No cloud costs
-- ✅ Fast iteration
-- ✅ Learning Kubernetes
+- Local testing
+- No cloud costs
+- Fast iteration
+- Learning Kubernetes
 
 ## Prerequisites
 
