@@ -13,11 +13,11 @@ gke:
 
 stack:
   # MLflow already deployed - commenting out
-  # - experiment_tracking:
-  #     name: mlflow
-  #     params:
-  #       image: mlflow-demo:latest
-  #       backend_store_uri: sqlite:///mlflow.db
+  - experiment_tracking:
+      name: mlflow
+      params:
+        image: mlflow-demo:latest
+        backend_store_uri: sqlite:///mlflow.db
   
   - model_serving:
       name: fastapi

@@ -39,6 +39,15 @@ deployml --version
 # - deployml: pip install deployml (or poetry install)
 ```
 
+**Important for users with existing kubeconfig (e.g., company clusters):**
+- ✅ **No manual kubeconfig setup needed** - The `deployml deploy` command automatically configures kubectl via `gcloud get-credentials`
+- ✅ **Your existing kubeconfig is safe** - The tool adds a new GKE context without deleting your company contexts
+- ⚠️ **After deployment**, kubectl will be pointing to the GKE cluster. You can switch back anytime:
+  ```bash
+  kubectl config get-contexts  # List all contexts
+  kubectl config use-context YOUR_COMPANY_CONTEXT  # Switch back
+  ```
+
 ### GCP Authentication
 
 ```bash
@@ -101,6 +110,15 @@ gcloud container clusters get-credentials CLUSTER_NAME \
 kubectl cluster-info
 kubectl get nodes
 ```
+
+**Note:** If you have an existing company kubeconfig:
+- ✅ **No manual setup needed** - `deployml deploy` handles everything automatically
+- ✅ **Your company kubeconfig is safe** - `gcloud get-credentials` adds a new context, it doesn't delete existing ones
+- ⚠️ **Context switching** - After deployment, kubectl will point to the GKE cluster. To switch back to your company cluster:
+  ```bash
+  kubectl config use-context YOUR_COMPANY_CONTEXT_NAME
+  ```
+- 📋 **View all contexts**: `kubectl config get-contexts`
 
 ### Cluster Sizing Recommendations
 
@@ -353,10 +371,10 @@ kubectl get svc fastapi-service
 
 # Get FastAPI URL
 FASTAPI_IP=$(kubectl get svc fastapi-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-echo "FastAPI URL: http://$FASTAPI_IP:8000"
+echo "FastAPI URL: http://34.82.236.4 :8000"
 
 # Test health endpoint
-curl http://$FASTAPI_IP:8000/health
+curl http://34.82.236.4:8000/health
 
 # Open Swagger UI
 open http://$FASTAPI_IP:8000/docs

@@ -723,6 +723,9 @@ def deploy(
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip confirmation prompts and deploy"
     ),
+    generate_only: bool = typer.Option(
+        False, "--generate-only", "-g", help="Only generate manifests, do not apply (for GKE deployments)"
+    ),
 ):
     """
     Deploy infrastructure based on a YAML configuration file.
@@ -2056,6 +2059,115 @@ def gke_init(
     else:
         typer.echo(f"Unknown service: {service}. Use 'mlflow' or 'fastapi'")
         raise typer.Exit(code=1)
+
+
+@cli.command()
+def gke_apply(
+    config_path: Path = typer.Option(
+        ..., "--config-path", "-c", help="Path to YAML config file"
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip confirmation prompts and apply"
+    ),
+):
+    """
+    Apply Kubernetes manifests to GKE cluster.
+    Manifests must be generated first using 'deployml deploy --config-path <config> --generate-only'.
+    """
+    if not config_path.exists():
+        typer.echo(f"❌ Config file not found: {config_path}")
+        raise typer.Exit(code=1)
+
+    config = yaml.safe_load(config_path.read_text())
+    
+    # Validate deployment type
+    deployment_type = config.get("deployment", {}).get("type")
+    if deployment_type != "gke":
+        typer.echo(f"❌ This command is only for GKE deployments. Found: {deployment_type}")
+        raise typer.Exit(code=1)
+    
+    workspace_name = config.get("name") or "development"
+    DEPLOYML_DIR = Path.cwd() / ".deployml" / workspace_name
+    manifests_dir = DEPLOYML_DIR / "manifests"
+    
+    if not manifests_dir.exists():
+        typer.echo(f"❌ Manifests directory not found: {manifests_dir}")
+        typer.echo("   Generate manifests first with: deployml deploy --config-path <config> --generate-only")
+        raise typer.Exit(code=1)
+    
+    # Extract GKE-specific config
+    project_id = config["provider"]["project_id"]
+    gke_config = config.get("gke", {})
+    cluster_name = gke_config.get("cluster_name")
+    zone = gke_config.get("zone")
+    region_gke = gke_config.get("region")
+    
+    if not cluster_name:
+        typer.echo("❌ GKE cluster_name must be specified in config.gke.cluster_name")
+        raise typer.Exit(code=1)
+    
+    if not zone and not region_gke:
+        typer.echo("❌ Either config.gke.zone or config.gke.region must be specified")
+        raise typer.Exit(code=1)
+    
+    typer.echo(f"🚀 Applying GKE manifests")
+    typer.echo(f"   Cluster: {cluster_name}")
+    typer.echo(f"   Location: {zone or region_gke}")
+    typer.echo(f"   Manifests: {manifests_dir}")
+    
+    # Import deployment function
+    from deployml.utils.kubernetes_gke import (
+        deploy_to_gke,
+        connect_to_gke_cluster,
+    )
+    
+    # Connect to GKE cluster
+    if not connect_to_gke_cluster(project_id, cluster_name, zone, region_gke):
+        raise typer.Exit(code=1)
+    
+    # Find and deploy all manifest directories
+    mlflow_manifest_dir = manifests_dir / "mlflow"
+    fastapi_manifest_dir = manifests_dir / "fastapi"
+    
+    if not yes:
+        typer.echo("\n⚠️  About to apply manifests to GKE cluster")
+        if not typer.confirm("Continue?"):
+            typer.echo("❌ Deployment cancelled")
+            return
+    
+    deployed_any = False
+    
+    if mlflow_manifest_dir.exists():
+        typer.echo(f"\n🚀 Deploying MLflow to GKE...")
+        if deploy_to_gke(
+            manifest_dir=mlflow_manifest_dir,
+            cluster_name=cluster_name,
+            project_id=project_id,
+            zone=zone,
+            region=region_gke,
+        ):
+            deployed_any = True
+        else:
+            raise typer.Exit(code=1)
+    
+    if fastapi_manifest_dir.exists():
+        typer.echo(f"\n🚀 Deploying FastAPI to GKE...")
+        if deploy_to_gke(
+            manifest_dir=fastapi_manifest_dir,
+            cluster_name=cluster_name,
+            project_id=project_id,
+            zone=zone,
+            region=region_gke,
+        ):
+            deployed_any = True
+        else:
+            raise typer.Exit(code=1)
+    
+    if deployed_any:
+        typer.echo("\n✅ GKE deployment complete!")
+    else:
+        typer.echo("\n⚠️  No manifests found to deploy")
+        typer.echo(f"   Check: {manifests_dir}")
 
 
 def main():
