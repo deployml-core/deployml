@@ -7,7 +7,8 @@ authors = [
     {name = "Drew Hoang", email = "codentell@gmail.com"},
     {name = "Jarvin Bayona", email = "jarvin.bayona@gmail.com"},
     {name = "Grant Nitta", email = "gtnitta@gmail.com"},
-    {name = "Robert Clements", email = "rclements@usfca.edu"}
+    {name = "Robert Clements", email = "rclements@usfca.edu"},
+    {name = "Venkatachalam Subramanian Periya Subbu", email = "venkatachalam.sps@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.11"
