@@ -72,7 +72,6 @@ nav:
   - GCP Cloud VM: tutorials/gcp-cloud-vm.md
   - GKE Deployment: tutorials/gke-deployment.md
   - Minikube: tutorials/minikube.md
-  - AWS: tutorials/aws.md
 - API Reference:
   - Overview: api/overview.md
   - CLI Commands: api/cli-commands.md

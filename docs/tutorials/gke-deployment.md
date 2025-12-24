@@ -156,7 +156,7 @@ deployml deploy -c gke-config.yaml
 # 5. Show LoadBalancer URLs
 ```
 
-### Option 2: Two-Step Workflow (Generate, Review, Apply)
+### Option 2: Two-Step Workflow (Generate, Review & Apply)
 
 **Step 1: Generate Manifests Only**
 

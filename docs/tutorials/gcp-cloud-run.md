@@ -155,17 +155,6 @@ gcloud run services logs read SERVICE_NAME --region REGION
 gcloud run services describe SERVICE_NAME --region REGION
 ```
 
-### High Costs
-
-```bash
-# Reduce max instances
-# Edit config.yaml and redeploy
-max_instances: 1
-
-# Or set to 0 to stop service
-min_instances: 0
-```
-
 ## Next Steps
 
 - Learn about [GKE deployment](gke-deployment.md) for production workloads
