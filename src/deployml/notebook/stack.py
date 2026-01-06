@@ -1,11 +1,12 @@
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, TYPE_CHECKING
 from datetime import datetime, timezone
 import pandas as pd
-import mlflow
-from mlflow.tracking import MlflowClient
+
+if TYPE_CHECKING:
+    from mlflow.tracking import MlflowClient
 
 from .urls import ServiceURLs
 from .display import display_services_table
@@ -85,9 +86,17 @@ class DeploymentStack:
             return ServiceURLs()
     
     @property  
-    def mlflow(self) -> MlflowClient:
-        """Get pre-configured MLflow client"""
+    def mlflow(self) -> 'MlflowClient':
+        """Get pre-configured MLflow client (lazy import)"""
         if self._mlflow_client is None:
+            try:
+                import mlflow
+                from mlflow.tracking import MlflowClient
+            except ImportError:
+                raise ImportError(
+                    "mlflow is required for MLflow client access. "
+                    "Install it with: pip install mlflow"
+                )
             if self.urls.mlflow:
                 mlflow.set_tracking_uri(self.urls.mlflow)
                 self._mlflow_client = MlflowClient(self.urls.mlflow)

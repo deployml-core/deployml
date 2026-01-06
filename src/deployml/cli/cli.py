@@ -454,7 +454,29 @@ import time
 import json
 from datetime import datetime, timedelta
 
-cli = typer.Typer()
+def get_version():
+    """Get version from package metadata"""
+    try:
+        from importlib.metadata import version
+        return version("deployml-core")
+    except Exception:
+        return "version unknown"
+
+cli = typer.Typer(invoke_without_command=True)
+
+@cli.callback()
+def cli_callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(False, "--version", "-v", help="Show version and exit"),
+):
+    """DeployML CLI - Infrastructure for academia with cost analysis"""
+    if version:
+        typer.echo(f"deployml {get_version()}")
+        raise typer.Exit()
+    if ctx.invoked_subcommand is None:
+        # No command provided, show help
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @cli.command()
