@@ -18,12 +18,6 @@ Before installing deployml, ensure you have:
 pip install deployml-core
 ```
 
-### Using poetry
-
-```bash
-poetry add deployml-core
-```
-
 ### From source
 
 ```bash
