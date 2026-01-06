@@ -32,7 +32,7 @@ Learn how to deploy MLflow and FastAPI using deployml.
 
 1. **Install deployml**
    ```bash
-   pip install deployml
+   pip install deployml-core
    ```
 
 2. **Initialize your cloud project**

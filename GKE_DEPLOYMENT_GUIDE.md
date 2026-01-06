@@ -36,7 +36,7 @@ deployml --version
 # - gcloud: https://cloud.google.com/sdk/docs/install
 # - kubectl: https://kubernetes.io/docs/tasks/tools/
 # - Docker: https://docs.docker.com/get-docker/
-# - deployml: pip install deployml (or poetry install)
+# - deployml: pip install deployml-core
 ```
 
 **Important for users with existing kubeconfig (e.g., company clusters):**
