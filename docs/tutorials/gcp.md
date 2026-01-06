@@ -39,7 +39,7 @@ Virtual machine deployment for MLflow and other services.
 
 1. **Install deployml**
    ```bash
-   pip install deployml
+   pip install deployml-core
    ```
 
 2. **Initialize GCP project**

@@ -15,13 +15,13 @@ Before installing deployml, ensure you have:
 ### Using pip
 
 ```bash
-pip install deployml
+pip install deployml-core
 ```
 
 ### Using poetry
 
 ```bash
-poetry add deployml
+poetry add deployml-core
 ```
 
 ### From source

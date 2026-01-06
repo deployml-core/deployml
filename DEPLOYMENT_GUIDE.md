@@ -37,7 +37,7 @@ python --version
 # - Minikube: https://minikube.sigs.k8s.io/docs/start/
 # - kubectl: https://kubernetes.io/docs/tasks/tools/
 # - Docker: https://docs.docker.com/get-docker/
-# - deployml: pip install deployml (or poetry install)
+# - deployml: pip install deployml-core (or poetry add deployml-core)
 # - Python 3.9+: https://www.python.org/downloads/
 ```
 
