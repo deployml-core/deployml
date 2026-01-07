@@ -154,10 +154,3 @@ gcloud run services logs read SERVICE_NAME --region REGION
 # Check service status
 gcloud run services describe SERVICE_NAME --region REGION
 ```
-
-## Next Steps
-
-- Learn about [GKE deployment](gke-deployment.md) for production workloads
-- Explore [Cloud VM deployment](gcp-cloud-vm.md) for persistent storage
-- Check [CLI Commands](../api/cli-commands.md) reference
-

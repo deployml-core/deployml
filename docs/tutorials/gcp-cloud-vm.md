@@ -137,10 +137,3 @@ sudo systemctl status mlflow
 # Restart service
 sudo systemctl restart mlflow
 ```
-
-## Next Steps
-
-- Learn about [Cloud Run deployment](gcp-cloud-run.md) for serverless
-- Explore [GKE deployment](gke-deployment.md) for Kubernetes
-- Check [CLI Commands](../api/cli-commands.md) reference
-

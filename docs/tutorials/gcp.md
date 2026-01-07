@@ -65,8 +65,3 @@ Virtual machine deployment for MLflow and other services.
 | Cost | Pay per use | Per node | Per VM |
 | Best For | Production APIs | Production workloads | Long-running services |
 | Setup Time | Fast | Medium | Medium |
-
-## Next Steps
-
-- Read the [Installation Guide](../installation.md)
-- Explore [CLI Commands](../api/cli-commands.md)

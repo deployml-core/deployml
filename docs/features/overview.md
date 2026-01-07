@@ -41,11 +41,3 @@ Instructors teaching MLOps courses can use deployml to quickly set up lab enviro
 ### For Students
 
 Students learning MLOps can use deployml to gain hands-on experience without getting bogged down in infrastructure complexity, practice with production-like environments, understand cloud deployment patterns, and focus their time on ML workflows rather than infrastructure setup.
-
-## Next Steps
-
-- Learn about [MLOps Components](pipeline.md) in detail
-- Understand [Cost Estimates](costs.md) and optimization
-- Explore [Tutorials](../tutorials/overview.md) for step-by-step guides
-- Check [CLI Commands](../api/cli-commands.md) reference
-

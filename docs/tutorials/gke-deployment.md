@@ -333,10 +333,3 @@ kubectl get pods -l app=fastapi
 kubectl logs -l app=mlflow --tail=50 -f
 kubectl logs -l app=fastapi --tail=50 -f
 ```
-
-## Next Steps
-
-- Learn about [Cloud Run deployment](gcp-cloud-run.md)
-- Explore [Minikube for local testing](minikube.md)
-- Check [CLI Commands](../api/cli-commands.md) reference
-

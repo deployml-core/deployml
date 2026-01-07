@@ -186,10 +186,3 @@ kubectl get svc
 # Use minikube service command
 minikube service SERVICE_NAME --url
 ```
-
-## Next Steps
-
-- Deploy to [GKE](gke-deployment.md) for production
-- Learn about [Cloud Run](gcp-cloud-run.md) for serverless
-- Check [CLI Commands](../api/cli-commands.md) reference
-

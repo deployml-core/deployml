@@ -31,7 +31,10 @@ pip install -e .
 ```bash
 # Check version
 deployml --version
+```
 
+Check that you have the right dependencies.
+```
 # Run system checks
 deployml doctor --project-id YOUR_PROJECT_ID
 ```
@@ -48,9 +51,3 @@ deployml generate
 # Deploy your stack
 deployml deploy --config-path your-config.yaml
 ```
-
-## Next Steps
-
-- Read the [GCP Cloud Run Tutorial](tutorials/gcp-cloud-run.md) for serverless deployments
-- Check out [GKE Deployment Guide](tutorials/gke-deployment.md) for Kubernetes
-- Explore [CLI Commands](api/cli-commands.md) reference

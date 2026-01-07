@@ -1,6 +1,6 @@
 # Cost Estimates
 
-deployml integrates with Infracost to provide cost estimates before deploying your infrastructure, helping you manage cloud costs effectively in academic settings.
+deployml integrates with [Infracost](https://github.com/infracost/infracost) to provide cost estimates before deploying your infrastructure, helping you manage cloud costs effectively in academic settings.
 
 ## Overview
 
@@ -23,9 +23,3 @@ A minimal development stack typically costs around $24 per month, while a standa
 ## Cost Optimization
 
 Use SQLite instead of Cloud SQL for development, choose appropriate machine types, enable auto-teardown to prevent forgotten deployments, use Cloud Run for variable workloads to take advantage of scale-to-zero pricing, and optimize storage through lifecycle policies.
-
-## Next Steps
-
-- Review [Features Overview](overview.md) for component details
-- Explore [MLOps Components](pipeline.md) for stack configuration
-- Check [Tutorials](../tutorials/overview.md) for deployment examples

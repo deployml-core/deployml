@@ -59,10 +59,3 @@ Components that use databases include MLflow for experiment tracking and model r
 ## Storage Options
 
 Storage is a critical component of any MLOps pipeline. Google Cloud Storage provides durable, scalable storage for MLflow artifacts, model files, and datasets.
-
-## Next Steps
-
-- Learn about [Cost Estimates](costs.md) for these components
-- Explore [Tutorials](../tutorials/overview.md) for deployment examples
-- Check [CLI Commands](../api/cli-commands.md) for configuration options
-
