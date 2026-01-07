@@ -62,5 +62,3 @@ Learn how to deploy MLflow and FastAPI using deployml.
 
 - Read the [Installation Guide](../installation.md)
 - Explore [CLI Commands](../api/cli-commands.md)
-- Check [FAQ](../faq.md)
-

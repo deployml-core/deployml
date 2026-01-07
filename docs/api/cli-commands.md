@@ -410,5 +410,3 @@ deployml minikube-deploy -d ./manifests/fastapi
 
 - Read [Installation Guide](../installation.md)
 - Explore [Tutorials](../tutorials/overview.md)
-- Check [FAQ](../faq.md) for common issues
-

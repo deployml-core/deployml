@@ -70,5 +70,3 @@ Virtual machine deployment for MLflow and other services.
 
 - Read the [Installation Guide](../installation.md)
 - Explore [CLI Commands](../api/cli-commands.md)
-- Check [FAQ](../faq.md) for common issues
-
