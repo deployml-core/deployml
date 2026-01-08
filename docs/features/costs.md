@@ -1,6 +1,6 @@
 # Cost Estimates
 
-deployml integrates with [Infracost](https://github.com/infracost/infracost){:target="_blank"} to provide cost estimates before deploying your infrastructure, helping you manage cloud costs effectively in academic settings.
+deployml integrates with [Infracost](https://github.com/infracost/infracost){target="_blank"} to provide cost estimates before deploying your infrastructure, helping you manage cloud costs effectively in academic settings.
 
 ## Overview
 
@@ -8,7 +8,7 @@ Cost analysis runs automatically during deployment, showing monthly cost estimat
 
 ## Setup
 
-Install Infracost and register for a free API key using the instructions [here](https://www.infracost.io/docs/#quick-start){:target="_blank"}. 
+Install Infracost and register for a free API key using the instructions [here](https://www.infracost.io/docs/#quick-start){target="_blank"}. 
 
 ## Configuration
 

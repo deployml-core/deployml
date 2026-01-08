@@ -6,11 +6,11 @@ deployml is a Python library designed to simplify the deployment of end-to-end M
 
 ### Infrastructure as Code
 
-deployml uses [Terraform](https://developer.hashicorp.com/terraform){:target="_blank"} to provision cloud infrastructure declaratively. Instead of manually configuring services through cloud consoles, you define your entire MLOps stack in a simple YAML configuration file. This approach provides several key benefits: reproducible deployments that work consistently across environments, version-controlled infrastructure that can be tracked in Git, easy teardown and cleanup when projects are complete, and elimination of manual configuration errors.
+deployml uses [Terraform](https://developer.hashicorp.com/terraform){target="_blank"} to provision cloud infrastructure declaratively. Instead of manually configuring services through cloud consoles, you define your entire MLOps stack in a simple YAML configuration file. This approach provides several key benefits: reproducible deployments that work consistently across environments, version-controlled infrastructure that can be tracked in Git, easy teardown and cleanup when projects are complete, and elimination of manual configuration errors.
 
 ### Cost Analysis
 
-Understanding cloud costs before deployment is crucial, especially in academic settings with limited budgets. deployml integrates with [Infracost](https://github.com/infracost/infracost){:target="_blank"} to provide cost estimates before any infrastructure is provisioned. You'll see monthly cost projections for your entire stack, receive warnings if costs exceed your configured threshold, and get cost breakdowns by component. This helps prevent unexpected bills and allows for better budget planning.
+Understanding cloud costs before deployment is crucial, especially in academic settings with limited budgets. deployml integrates with [Infracost](https://github.com/infracost/infracost){target="_blank"} to provide cost estimates before any infrastructure is provisioned. You'll see monthly cost projections for your entire stack, receive warnings if costs exceed your configured threshold, and get cost breakdowns by component. This helps prevent unexpected bills and allows for better budget planning.
 
 ### Multi-Cloud Support
 
@@ -18,7 +18,7 @@ Currently focused on Google Cloud Platform (GCP), deployml supports multiple dep
 
 ### ML-Focused Components
 
-deployml comes pre-configured with essential MLOps tools that work together seamlessly. The platform supports experiment tracking through MLflow, allowing you to log parameters, metrics, and artifacts from your ML experiments. Model registry capabilities enable centralized model versioning and stage management. Feature store integration with [Feast](https://feast.dev/){:target="_blank"} provides consistent features across training and serving. [FastAPI](https://fastapi.tiangolo.com/){:target="_blank"} endpoints make it easy to deploy models as production-ready APIs. [Grafana](https://grafana.com/){:target="_blank"} dashboards offer monitoring and visualization capabilities. Workflow orchestration through cron jobs enables scheduled training, scoring, and monitoring tasks.
+deployml comes pre-configured with essential MLOps tools that work together seamlessly. The platform supports experiment tracking through MLflow, allowing you to log parameters, metrics, and artifacts from your ML experiments. Model registry capabilities enable centralized model versioning and stage management. Feature store integration with [Feast](https://feast.dev/){target="_blank"} provides consistent features across training and serving. [FastAPI](https://fastapi.tiangolo.com/){target="_blank"} endpoints make it easy to deploy models as production-ready APIs. [Grafana](https://grafana.com/){target="_blank"} dashboards offer monitoring and visualization capabilities. Workflow orchestration through cron jobs enables scheduled training, scoring, and monitoring tasks.
 
 
 ## What deployml Provides
