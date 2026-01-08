@@ -6,13 +6,13 @@ We welcome contributors who are interested in helping with issues/bugs and expan
 
 You can help improve the project in several ways:
 
-- Bug reports: Identify issues with deployment, configuration, or documentation.  
-- Feature requests: Suggest improvements that would benefit classroom use or learning.  
-- Code contributions: Add features, fix bugs, or improve reliability.  
-- Documentation: Improve setup guides, examples, or explanations for students and instructors.  
-- Educational feedback: Share insights about how the tool works in a teaching or learning context.
+- Bug reports: Identify issues with deployment, configuration, or documentation ([open an issue](https://github.com/deployml-core/deployml/issues){:target="_blank"}).  
+- Feature requests: Suggest improvements that would benefit classroom use or learning ([open an issue](https://github.com/deployml-core/deployml/issues){:target="_blank"}).  
+- Code contributions: Add features, fix bugs, or improve reliability (submit a pull request).  
+- Documentation: Improve setup guides, examples, or explanations for students and instructors (submit a pull request).  
+- Educational feedback: Share insights about how the tool works in a teaching or learning context (contact info [here](https://robertclements.org/){:target="_blank"}).
 
-## Getting Started
+## Getting Started with Code or Documentation Contributions
 
 1. Fork the repository and clone your fork locally.  
 2. Follow the setup instructions in the main README to install dependencies and configure your environment.  
@@ -31,7 +31,7 @@ Pull requests may be reviewed with an emphasis on clarity, maintainability, and 
 
 ## Reporting Issues
 
-If you find a bug or have a suggestion, please [open an issue](https://github.com/deployml-core/deployml/issues) and include:
+If you find a bug or have a suggestion, please [open an issue](https://github.com/deployml-core/deployml/issues){:target="_blank"} and include:
 
 - A clear description of the problem or idea. 
 - Steps to reproduce (if applicable). 

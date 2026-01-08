@@ -1,6 +1,6 @@
 # Cost Estimates
 
-deployml integrates with [Infracost](https://github.com/infracost/infracost) to provide cost estimates before deploying your infrastructure, helping you manage cloud costs effectively in academic settings.
+deployml integrates with [Infracost](https://github.com/infracost/infracost){:target="_blank"} to provide cost estimates before deploying your infrastructure, helping you manage cloud costs effectively in academic settings.
 
 ## Overview
 
@@ -8,18 +8,39 @@ Cost analysis runs automatically during deployment, showing monthly cost estimat
 
 ## Setup
 
-Install Infracost using Homebrew (macOS), shell script (Linux), or Chocolatey (Windows). Create a free Infracost account and authenticate using the command line to save your API key locally.
+Install Infracost and register for a free API key using the instructions [here](https://www.infracost.io/docs/#quick-start){:target="_blank"}. 
 
 ## Configuration
 
 Cost analysis is enabled by default. Configure it in your YAML file to enable or disable cost analysis, set a warning threshold in USD (default $100/month), and choose the currency for cost display.
 
+Here is an example of what this might look like:
+```yaml
+cost_analysis:
+  enabled: true              # Enable/disable cost analysis (default: true)
+  warning_threshold: 50.0    # Warn if monthly cost exceeds this amount (default: 100.0)
+  currency: "USD"   
+  bucket_amount: 200        # GB stored across GCS buckets
+  cloudsql_amount: 50       # GB of Cloud SQL storage
+```
+
 ## Typical Costs
 
-Cloud Run services cost $10-30 per month depending on traffic. Cloud SQL PostgreSQL ranges from $7/month for small instances to $25+ for production. Google Cloud Storage costs approximately $0.020 per GB per month. BigQuery storage costs $0.020 per GB per month with query costs based on data scanned. Cloud VMs cost approximately $25 per month for medium instances. GKE clusters have no management fee, but you pay for VM instances and load balancers.
+Here are estimated typical costs for several **GCP** services, but please do not simply believe these numbers without keeping track of costs yourself.
 
-A minimal development stack typically costs around $24 per month, while a standard production stack costs approximately $125 per month.
+- Cloud Run services cost $10-30 per month depending on traffic.  
+- Cloud SQL PostgreSQL ranges from $7/month for small instances to $25+ for production.  
+- Google Cloud Storage costs approximately $0.020 per GB per month.   
+- BigQuery storage costs $0.020 per GB per month with query costs based on data scanned.  
+- Cloud VMs cost approximately $25 per month for medium instances.   
+- GKE clusters have no management fee, but you pay for VM instances and load balancers. Note that the GKE can get very expensive very quickly.
+
+
 
 ## Cost Optimization
 
-Use SQLite instead of Cloud SQL for development, choose appropriate machine types, enable auto-teardown to prevent forgotten deployments, use Cloud Run for variable workloads to take advantage of scale-to-zero pricing, and optimize storage through lifecycle policies.
+Here are some tips to keep the costs low while you are learning:  
+
+- Use SQLite instead of Cloud SQL whenever possible, particularly for development purposes and when your data is small.  
+- Enable auto-teardown to prevent forgotten deployments. 
+- Use Cloud Run for variable workloads to take advantage of scale-to-zero pricing.
