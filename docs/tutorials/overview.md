@@ -1,54 +1,44 @@
 # Tutorials Overview
 
-Learn how to deploy MLflow and FastAPI using deployml.
+Learn how to deploy a simple MLOps infrastructure using deployml.
 
 ## Deployment Options
 
+### Minikube (Local)
+
+This infrastructure will use minikube and will be deployed locally, which is useful for practicing with Kubernetes locally before going to the cloud. Note that this is limited to deploying MLFlow and FastAPI, and still requires knowledge of minikube and kubectl commands.
+
+- Local testing
+- No cloud costs
+- Fast iteration
+- [Get Started →](minikube.md)
+
 ### Cloud Run (Serverless)
+
+This infrastructure will be deployed in the cloud using a serverless architecture.
+
 - Automatic scaling
 - Pay per use
 - No infrastructure management
 - [Get Started →](gcp-cloud-run.md)
 
 ### GKE (Kubernetes)
+
+This infrastructure will be deployed in the cloud, with some components running in Kubernetes rather than serverless.
+
 - Production-ready
 - Full control
 - Custom configurations
 - [Get Started →](gke-deployment.md)
 
 ### Cloud VM
+
+This infrastructure is launched entirely within a VM in the cloud. 
+
 - Persistent storage
 - Full control
 - Cost-effective for long-running services
 - [Get Started →](gcp-cloud-vm.md)
-
-### Minikube (Local)
-- Local testing
-- No cloud costs
-- Fast iteration
-- [Get Started →](minikube.md)
-
-## Quick Start
-
-1. **Install deployml**
-   ```bash
-   pip install deployml-core
-   ```
-
-2. **Initialize your cloud project**
-   ```bash
-   deployml init --provider gcp --project-id YOUR_PROJECT_ID
-   ```
-
-3. **Generate a config**
-   ```bash
-   deployml generate
-   ```
-
-4. **Deploy**
-   ```bash
-   deployml deploy --config-path your-config.yaml
-   ```
 
 ## Choose Your Deployment Type
 
@@ -57,8 +47,3 @@ Learn how to deploy MLflow and FastAPI using deployml.
 | Scaling | Automatic | Manual | Manual | N/A |
 | Cost | Pay per use | Per node | Per VM | Free |
 | Best For | Production APIs | Production workloads | Long-running services | Development |
-
-## Next Steps
-
-- Read the [Installation Guide](../installation.md)
-- Explore [CLI Commands](../api/cli-commands.md)

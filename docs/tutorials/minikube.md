@@ -1,6 +1,6 @@
 # Minikube Local Deployment
 
-Deploy MLflow and FastAPI locally using Minikube for testing and development.
+Deploy MLFlow and FastAPI locally using minikube for testing and development. Note that this infrastructure does NOT include all the components of the MLOps pipeline - it is limited to MLFlow and FastAPI and is meant for practice with Kubernetes before moving to the cloud. deployml only generates the manifest (which then may need to be edited) and then creates the deployment in minikube.
 
 ## Overview
 
@@ -13,20 +13,16 @@ Minikube provides a local Kubernetes environment for testing and development. It
 
 ## Prerequisites
 
+Install minikube following instructures [here](https://minikube.sigs.k8s.io/docs/start/?arch=%2Fmacos%2Fx86-64%2Fstable%2Fbinary+download).
+
 ```bash
-# Install minikube
-# macOS
-brew install minikube
-
-# Linux
-curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-sudo install minikube-linux-amd64 /usr/local/bin/minikube
-
 # Verify installation
 minikube version
 ```
 
-## Quick Start
+## Example
+
+deployml is only used for generating the manifest and then deploying in minikube. In order to deploy MLFlow and FastAPI in minikube, we will need the Docker images for both.
 
 ### 1. Initialize Minikube for MLflow
 
