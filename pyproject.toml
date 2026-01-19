@@ -1,7 +1,7 @@
 
 [project]
 name = "deployml-core"
-version = "0.0.1"
+version = "0.0.42"
 description = "Infra for academia"
 authors = [
     {name = "Drew Hoang", email = "codentell@gmail.com"},
