@@ -460,6 +460,18 @@ def get_version():
         from importlib.metadata import version
         return version("deployml-core")
     except Exception:
+        try:
+            result = subprocess.run(
+                ["git", "describe", "--tags", "--abbrev=0"],
+                capture_output=True,
+                text=True,
+                cwd=Path(__file__).parent.parent.parent.parent
+            )
+            if result.returncode == 0:
+                git_version = result.stdout.strip().lstrip("v")
+                return git_version
+        except Exception:
+            pass
         return "version unknown"
 
 cli = typer.Typer(invoke_without_command=True)
