@@ -138,30 +138,30 @@ class DeployMLDoctor:
     def _check_required_packages(self):
         """Check required Python packages"""
         required_packages = [
-            ('typer', 'CLI framework'),
-            ('pyyaml', 'YAML configuration parsing'),
-            ('jinja2', 'Template rendering'),
-            ('pandas', 'Data manipulation'),
-            ('requests', 'HTTP client'),
-            ('ipython', 'Interactive Python'),
-            ('jupyter', 'Notebook support')
+            ('typer', 'typer', 'CLI framework'),
+            ('pyyaml', 'yaml', 'YAML configuration parsing'),
+            ('jinja2', 'jinja2', 'Template rendering'),
+            ('pandas', 'pandas', 'Data manipulation'),
+            ('requests', 'requests', 'HTTP client'),
+            ('ipython', 'IPython', 'Interactive Python'),
+            ('jupyter', 'jupyter', 'Notebook support')
         ]
         
-        for package, description in required_packages:
+        for pip_name, import_name, description in required_packages:
             try:
-                importlib.import_module(package)
-                version = self._get_package_version(package)
+                importlib.import_module(import_name)
+                version = self._get_package_version(pip_name)
                 self._add_result(CheckResult(
-                    name=f"Package: {package}",
+                    name=f"Package: {pip_name}",
                     status=CheckStatus.PASS,
                     message=f"{description} - v{version}" if version else f"{description} - installed"
                 ))
             except ImportError:
                 self._add_result(CheckResult(
-                    name=f"Package: {package}",
+                    name=f"Package: {pip_name}",
                     status=CheckStatus.FAIL,
-                    message=f"Missing required package: {package} ({description})",
-                    fix_command=f"pip install {package}",
+                    message=f"Missing required package: {pip_name} ({description})",
+                    fix_command=f"pip install {pip_name}",
                     required=True
                 ))
     
