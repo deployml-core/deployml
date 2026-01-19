@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import json
 import importlib
-import pkg_resources
+try:
+    from importlib.metadata import version as get_package_version_metadata
+except ImportError:
+    # Fallback for Python < 3.8
+    try:
+        from importlib_metadata import version as get_package_version_metadata
+    except ImportError:
+        get_package_version_metadata = None
 from dataclasses import dataclass
 from enum import Enum
 import re
@@ -190,8 +197,11 @@ class DeployMLDoctor:
     def _get_package_version(self, package_name: str) -> Optional[str]:
         """Get version of installed package"""
         try:
-            return pkg_resources.get_distribution(package_name).version
-        except:
+            if get_package_version_metadata:
+                return get_package_version_metadata(package_name)
+            else:
+                return None
+        except Exception:
             return None
     
     def _check_docker(self):
