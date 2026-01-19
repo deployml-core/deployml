@@ -77,7 +77,7 @@ def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspac
         )
         
         if state_proc.returncode != 0:
-            typer.echo(f"⚠️  Could not read Terraform state: {state_proc.stderr}")
+            typer.echo(f"WARNING: Could not read Terraform state: {state_proc.stderr}")
             return
         
         # Find the terraform_files bucket resource
@@ -88,7 +88,7 @@ def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspac
                 break
         
         if not bucket_resource:
-            typer.echo("⚠️  Teardown module bucket not found in state. Skipping upload.")
+            typer.echo("WARNING: Teardown module bucket not found in state. Skipping upload.")
             return
         
         # Get bucket name from state
@@ -100,7 +100,7 @@ def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspac
         )
         
         if show_proc.returncode != 0:
-            typer.echo(f"⚠️  Could not get bucket name: {show_proc.stderr}")
+            typer.echo(f"WARNING: Could not get bucket name: {show_proc.stderr}")
             return
         
         # Extract bucket name from terraform state show output
@@ -111,7 +111,7 @@ def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspac
                 break
         
         if not bucket_name:
-            typer.echo("⚠️  Could not extract bucket name from state.")
+            typer.echo("WARNING: Could not extract bucket name from state.")
             return
         
         # Upload Terraform files
@@ -134,10 +134,10 @@ def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspac
                 blob.upload_from_filename(str(tf_file))
                 uploaded_count += 1
         
-        typer.echo(f"✅ Uploaded {uploaded_count} Terraform files to gs://{bucket_name}/{workspace_name}/terraform/")
+        typer.echo(f" Uploaded {uploaded_count} Terraform files to gs://{bucket_name}/{workspace_name}/terraform/")
         
     except Exception as e:
-        typer.echo(f"⚠️  Error uploading Terraform files: {e}")
+        typer.echo(f"WARNING: Error uploading Terraform files: {e}")
         import traceback
         typer.echo(traceback.format_exc())
 
@@ -443,10 +443,10 @@ def upload_resource_manifest(manifest: dict, terraform_dir: Path, project_id: st
         blob = bucket.blob(f"{workspace_name}/resource-manifest.json")
         blob.upload_from_string(json.dumps(manifest, indent=2))
         
-        typer.echo(f"✅ Resource manifest uploaded to gs://{bucket_name}/{workspace_name}/resource-manifest.json")
+        typer.echo(f" Resource manifest uploaded to gs://{bucket_name}/{workspace_name}/resource-manifest.json")
         
     except Exception as e:
-        typer.echo(f"⚠️  Error uploading resource manifest: {e}")
+        typer.echo(f"WARNING: Error uploading resource manifest: {e}")
         raise
 
 import re
@@ -501,7 +501,7 @@ def doctor(
     Run system checks for required tools and authentication for DeployML.
     Also checks if all required GCP APIs are enabled if GCP CLI is installed and authenticated.
     """
-    typer.echo("\n📋 DeployML Doctor Summary:\n")
+    typer.echo("\n DeployML Doctor Summary:\n")
 
     docker_installed = check("docker")
     terraform_installed = check("terraform")
@@ -512,22 +512,22 @@ def doctor(
 
     # Docker
     if docker_installed:
-        typer.secho("\n✅ Docker 🐳 is installed", fg=typer.colors.GREEN)
+        typer.secho("\n Docker is installed", fg=typer.colors.GREEN)
     else:
-        typer.secho("\n❌ Docker is not installed", fg=typer.colors.RED)
+        typer.secho("\n Docker is not installed", fg=typer.colors.RED)
 
     # Terraform
     if terraform_installed:
-        typer.secho("\n✅ Terraform 🔧 is installed", fg=typer.colors.GREEN)
+        typer.secho("\n Terraform is installed", fg=typer.colors.GREEN)
     else:
-        typer.secho("\n❌ Terraform is not installed", fg=typer.colors.RED)
+        typer.secho("\n Terraform is not installed", fg=typer.colors.RED)
 
     # Infracost
     if infracost_installed:
-        typer.secho("\n✅ Infracost 💰 is installed", fg=typer.colors.GREEN)
+        typer.secho("\n Infracost is installed", fg=typer.colors.GREEN)
     else:
         typer.secho(
-            "\n⚠️ Infracost 💰 not installed (optional)", fg=typer.colors.YELLOW
+            "\nWARNING: Infracost not installed (optional)", fg=typer.colors.YELLOW
         )
         typer.echo(
             "   Install for cost analysis: https://www.infracost.io/docs/#quick-start"
@@ -536,7 +536,7 @@ def doctor(
     # GCP CLI
     if gcp_installed and gcp_authed:
         typer.secho(
-            "\n✅ GCP CLI ☁️  installed and authenticated", fg=typer.colors.GREEN
+            "\n GCP CLI installed and authenticated", fg=typer.colors.GREEN
         )
         # Check enabled GCP APIs
         if not project_id:
@@ -546,8 +546,10 @@ def doctor(
                 show_default=False,
             )
         if project_id:
+            project_id = project_id.strip()
+        if project_id:  # Check if not empty after stripping
             typer.echo(
-                f"\n🔎 Checking enabled APIs for project: {project_id} ..."
+                f"\n Checking enabled APIs for project: {project_id} ..."
             )
             result = subprocess.run(
                 [
@@ -563,7 +565,9 @@ def doctor(
                 text=True,
             )
             if result.returncode != 0:
-                typer.echo("❌ Failed to list enabled APIs.")
+                typer.secho(" Failed to list enabled APIs.", fg=typer.colors.RED)
+                if result.stderr:
+                    typer.echo(f"   Error: {result.stderr.strip()}")
             else:
                 enabled_apis = set(result.stdout.strip().splitlines())
                 missing_apis = [
@@ -571,12 +575,12 @@ def doctor(
                 ]
                 if not missing_apis:
                     typer.secho(
-                        "✅ All required GCP APIs are enabled.",
+                        " All required GCP APIs are enabled.",
                         fg=typer.colors.GREEN,
                     )
                 else:
                     typer.secho(
-                        "⚠️  The following required APIs are NOT enabled:",
+                        "WARNING: The following required APIs are NOT enabled:",
                         fg=typer.colors.YELLOW,
                     )
                     for api in missing_apis:
@@ -584,19 +588,27 @@ def doctor(
                     typer.echo(
                         "You can enable them with: deployml init --provider gcp --project-id <PROJECT_ID>"
                     )
+        elif project_id:  # Empty string after stripping
+            typer.secho(
+                "\nWARNING: No project ID provided. Skipping API check.",
+                fg=typer.colors.YELLOW,
+            )
     elif gcp_installed:
         typer.secho(
-            "\n⚠️ GCP CLI ⛈️  installed but not authenticated",
+            "\nWARNING: GCP CLI installed but not authenticated",
             fg=typer.colors.YELLOW,
         )
     else:
-        typer.secho("\n❌ GCP CLI ⛈️  not installed", fg=typer.colors.RED)
+        typer.secho("\n GCP CLI not installed", fg=typer.colors.RED)
 
     # AWS CLI
     if aws_installed:
-        typer.secho(f"\n✅ AWS CLI ☁️  installed", fg=typer.colors.GREEN)
+        typer.secho(f"\n AWS CLI installed", fg=typer.colors.GREEN)
     else:
-        typer.secho("\n❌ AWS CLI ⛈️  not installed", fg=typer.colors.RED)
+        typer.secho(
+            "\n AWS CLI not installed",
+            fg=typer.colors.YELLOW,
+        )
     typer.echo()
 
 
@@ -616,13 +628,13 @@ def generate():
     display_banner("Welcome to DeployML Stack Generator!")
     typer.echo("\n")
     name = prompt("MLOps Stack name", "stack")
-    provider = show_menu("☁️  Select Provider", CloudProvider, CloudProvider.GCP)
+    provider = show_menu("  Select Provider", CloudProvider, CloudProvider.GCP)
 
     # Import DeploymentType here to avoid circular imports
     from deployml.enum.deployment_type import DeploymentType
 
     deployment_type = show_menu(
-        "🚀 Select Deployment Type", DeploymentType, DeploymentType.CLOUD_RUN
+        " Select Deployment Type", DeploymentType, DeploymentType.CLOUD_RUN
     )
 
     # Get provider-specific details
@@ -702,7 +714,7 @@ def generate():
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
     typer.secho(
-        f"\n✅ Configuration saved to: {config_filename}", fg=typer.colors.GREEN
+        f"\n Configuration saved to: {config_filename}", fg=typer.colors.GREEN
     )
     typer.echo(f"\nTo deploy this configuration, run:")
     typer.secho(
@@ -727,7 +739,7 @@ def terraform(
     print(action)
     if action not in ["plan", "apply", "destroy"]:
         typer.secho(
-            f"❌ Invalid action: {action}. Use: plan, apply, destroy",
+            f" Invalid action: {action}. Use: plan, apply, destroy",
             fg=typer.colors.RED,
         )
 
@@ -740,7 +752,7 @@ def terraform(
 
     except Exception as e:
         typer.secho(
-            f"❌ Failed to load configuration: {e}", fg=typer.colors.RED
+            f" Failed to load configuration: {e}", fg=typer.colors.RED
         )
 
     if not output_dir:
@@ -765,7 +777,7 @@ def deploy(
     Deploy infrastructure based on a YAML configuration file.
     """
     if not config_path.exists():
-        typer.echo(f"❌ Config file not found: {config_path}")
+        typer.echo(f" Config file not found: {config_path}")
         raise typer.Exit(code=1)
 
     config = yaml.safe_load(config_path.read_text())
@@ -789,7 +801,7 @@ def deploy(
                     if not tool["params"].get("artifact_bucket"):
                         new_bucket = generate_bucket_name(project_id)
                         typer.echo(
-                            f"📦 No bucket specified for artifact_tracking, using generated bucket name: {new_bucket}"
+                            f" No bucket specified for artifact_tracking, using generated bucket name: {new_bucket}"
                         )
                         tool["params"]["artifact_bucket"] = new_bucket
                         # Set create_artifact_bucket to True for generated buckets
@@ -811,8 +823,8 @@ def deploy(
     DEPLOYML_TERRAFORM_DIR = DEPLOYML_DIR / "terraform"
     DEPLOYML_MODULES_DIR = DEPLOYML_DIR / "terraform" / "modules"
 
-    typer.echo(f"📁 Using workspace: {workspace_name}")
-    typer.echo(f"📍 Workspace path: {DEPLOYML_DIR}")
+    typer.echo(f" Using workspace: {workspace_name}")
+    typer.echo(f" Workspace path: {DEPLOYML_DIR}")
 
     DEPLOYML_TERRAFORM_DIR.mkdir(parents=True, exist_ok=True)
     DEPLOYML_MODULES_DIR.mkdir(parents=True, exist_ok=True)
@@ -823,7 +835,7 @@ def deploy(
 
     # Handle GKE deployment type (Kubernetes manifests, not Terraform)
     if deployment_type == "gke":
-        typer.echo("🚀 GKE deployment detected")
+        typer.echo(" GKE deployment detected")
         typer.echo("   Using Kubernetes manifests (similar to minikube)")
         typer.echo("   Images will be pushed to GCR")
         
@@ -834,11 +846,11 @@ def deploy(
         region_gke = gke_config.get("region")
         
         if not cluster_name:
-            typer.echo("❌ GKE cluster_name must be specified in config.gke.cluster_name")
+            typer.echo(" GKE cluster_name must be specified in config.gke.cluster_name")
             raise typer.Exit(code=1)
         
         if not zone and not region_gke:
-            typer.echo("❌ Either config.gke.zone or config.gke.region must be specified")
+            typer.echo(" Either config.gke.zone or config.gke.region must be specified")
             raise typer.Exit(code=1)
         
         typer.echo(f"   Cluster: {cluster_name}")
@@ -873,7 +885,7 @@ def deploy(
                     artifact_root = params.get("artifact_root")
                     
                     mlflow_manifest_dir = manifests_dir / "mlflow"
-                    typer.echo(f"\n📦 Generating MLflow manifests...")
+                    typer.echo(f"\n Generating MLflow manifests...")
                     generate_mlflow_manifests_gke(
                         output_dir=mlflow_manifest_dir,
                         image=image,
@@ -889,7 +901,7 @@ def deploy(
                     mlflow_uri = params.get("mlflow_tracking_uri", "http://mlflow-service:5000")
                     
                     fastapi_manifest_dir = manifests_dir / "fastapi"
-                    typer.echo(f"\n📦 Generating FastAPI manifests...")
+                    typer.echo(f"\n Generating FastAPI manifests...")
                     generate_fastapi_manifests_gke(
                         output_dir=fastapi_manifest_dir,
                         image=image,
@@ -900,7 +912,7 @@ def deploy(
         
         # Deploy manifests
         if mlflow_manifest_dir and mlflow_manifest_dir.exists():
-            typer.echo(f"\n🚀 Deploying MLflow to GKE...")
+            typer.echo(f"\n Deploying MLflow to GKE...")
             if not deploy_to_gke(
                 manifest_dir=mlflow_manifest_dir,
                 cluster_name=cluster_name,
@@ -911,7 +923,7 @@ def deploy(
                 raise typer.Exit(code=1)
         
         if fastapi_manifest_dir and fastapi_manifest_dir.exists():
-            typer.echo(f"\n🚀 Deploying FastAPI to GKE...")
+            typer.echo(f"\n Deploying FastAPI to GKE...")
             if not deploy_to_gke(
                 manifest_dir=fastapi_manifest_dir,
                 cluster_name=cluster_name,
@@ -921,8 +933,8 @@ def deploy(
             ):
                 raise typer.Exit(code=1)
         
-        typer.echo("\n✅ GKE deployment complete!")
-        typer.echo(f"📁 Manifests saved to: {manifests_dir}")
+        typer.echo("\n GKE deployment complete!")
+        typer.echo(f" Manifests saved to: {manifests_dir}")
         return
     
     # Continue with Terraform-based deployments (cloud_run, cloud_vm)
@@ -958,7 +970,7 @@ def deploy(
     teardown_config = config.get("teardown", {})
     teardown_enabled = teardown_config.get("enabled", False)
 
-    typer.echo("📦 Copying module templates...")
+    typer.echo(" Copying module templates...")
     copy_modules_to_workspace(
         DEPLOYML_MODULES_DIR,
         stack=stack,
@@ -991,13 +1003,13 @@ def deploy(
                 )
 
                 typer.echo(
-                    f"📦 Bucket config: {stage_name}/{tool['name']} -> {bucket_name} (create: {create_bucket}, exists: {bucket_exists_flag})"
+                    f" Bucket config: {stage_name}/{tool['name']} -> {bucket_name} (create: {create_bucket}, exists: {bucket_exists_flag})"
                 )
 
     # Simple boolean flag for backward compatibility
     create_artifact_bucket = any(config["create"] for config in bucket_configs)
 
-    typer.echo(f"🔧 Unified bucket creation: {create_artifact_bucket}")
+    typer.echo(f" Unified bucket creation: {create_artifact_bucket}")
 
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
     # PATCH: Use wandb_main.tf.j2 or mlflow_main.tf.j2 for cloud_run if present
@@ -1105,10 +1117,10 @@ def deploy(
     (DEPLOYML_TERRAFORM_DIR / "terraform.tfvars").write_text(tfvars_content)
 
     # Deploy
-    typer.echo(f"🚀 Deploying {config['name']} to {cloud}...")
+    typer.echo(f" Deploying {config['name']} to {cloud}...")
 
     if not check_gcp_auth():
-        typer.echo("🔐 Authenticating with GCP...")
+        typer.echo(" Authenticating with GCP...")
         subprocess.run(
             ["gcloud", "auth", "application-default", "login"],
             cwd=DEPLOYML_TERRAFORM_DIR,
@@ -1119,7 +1131,7 @@ def deploy(
         cwd=DEPLOYML_TERRAFORM_DIR,
     )
 
-    typer.echo("📋 Initializing Terraform...")
+    typer.echo(" Initializing Terraform...")
     # Suppress output of terraform init
     subprocess.run(
         ["terraform", "init"],
@@ -1128,7 +1140,7 @@ def deploy(
         stderr=subprocess.DEVNULL,
     )
 
-    typer.echo("📊 Planning deployment...")
+    typer.echo(" Planning deployment...")
     result = subprocess.run(
         ["terraform", "plan"],
         cwd=DEPLOYML_TERRAFORM_DIR,
@@ -1137,7 +1149,7 @@ def deploy(
     )
 
     if result.returncode != 0:
-        typer.echo(f"❌ Terraform plan failed: {result.stderr}")
+        typer.echo(f" Terraform plan failed: {result.stderr}")
         raise typer.Exit(code=1)
 
     # Run cost analysis after successful terraform plan
@@ -1200,13 +1212,13 @@ def deploy(
         cost_msg = format_cost_for_confirmation(
             cost_analysis.total_monthly_cost, cost_analysis.currency
         )
-        confirmation_msg = f"🚀 Deploy stack? {cost_msg}"
+        confirmation_msg = f" Deploy stack? {cost_msg}"
     else:
-        confirmation_msg = "🚀 Do you want to deploy the stack?"
+        confirmation_msg = " Do you want to deploy the stack?"
 
     if yes or typer.confirm(confirmation_msg):
         estimated_time = estimate_terraform_time(result.stdout, "apply")
-        typer.echo(f"🏗️ Applying changes... (Estimated time: {estimated_time})")
+        typer.echo(f" Applying changes... (Estimated time: {estimated_time})")
         # Suppress output of terraform init
         subprocess.run(
             ["terraform", "init"],
@@ -1227,16 +1239,16 @@ def deploy(
             minutes,
         )
         if result_code == 0:
-            typer.echo("✅ Deployment complete!")
+            typer.echo(" Deployment complete!")
             
             # Upload Terraform files and resource manifest to GCS for teardown (if enabled)
             if teardown_enabled:
                 try:
-                    typer.echo("📤 Uploading Terraform files to GCS for teardown...")
+                    typer.echo(" Uploading Terraform files to GCS for teardown...")
                     upload_terraform_files_to_gcs(DEPLOYML_TERRAFORM_DIR, project_id, workspace_name)
                     
                     # Extract and upload resource manifest
-                    typer.echo("📋 Extracting resource manifest...")
+                    typer.echo(" Extracting resource manifest...")
                     manifest = extract_resource_manifest(
                         DEPLOYML_TERRAFORM_DIR,
                         project_id,
@@ -1244,10 +1256,10 @@ def deploy(
                         region
                     )
                     upload_resource_manifest(manifest, DEPLOYML_TERRAFORM_DIR, project_id, workspace_name)
-                    typer.echo("✅ Resource manifest uploaded successfully")
+                    typer.echo(" Resource manifest uploaded successfully")
                     
                 except Exception as e:
-                    typer.echo(f"⚠️  Warning: Could not upload files/manifest to GCS: {e}")
+                    typer.echo(f"WARNING: Warning: Could not upload files/manifest to GCS: {e}")
                     typer.echo("   Teardown may not work automatically. Manual teardown required.")
             
             # Handle auto-teardown metadata and update scheduler schedule
@@ -1265,7 +1277,7 @@ def deploy(
                 # Update the Cloud Scheduler job with the correct schedule
                 scheduler_job_name = f"deployml-teardown-{workspace_name}"
                 try:
-                    typer.echo(f"⏰ Updating teardown schedule to: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                    typer.echo(f" Updating teardown schedule to: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
                     update_result = subprocess.run(
                         [
                             "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
@@ -1279,13 +1291,13 @@ def deploy(
                         text=True,
                     )
                     if update_result.returncode == 0:
-                        typer.echo(f"✅ Teardown schedule updated successfully")
+                        typer.echo(f" Teardown schedule updated successfully")
                     else:
-                        typer.echo(f"⚠️  Warning: Could not update scheduler schedule: {update_result.stderr}")
+                        typer.echo(f"WARNING: Warning: Could not update scheduler schedule: {update_result.stderr}")
                         typer.echo(f"   Schedule may be incorrect. Check manually with:")
                         typer.echo(f"   gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id}")
                 except Exception as e:
-                    typer.echo(f"⚠️  Warning: Could not update scheduler schedule: {e}")
+                    typer.echo(f"WARNING: Warning: Could not update scheduler schedule: {e}")
                     typer.echo(f"   Schedule may be incorrect. Check manually with:")
                     typer.echo(f"   gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id}")
                 
@@ -1298,7 +1310,7 @@ def deploy(
                 }
                 save_deployment_metadata(DEPLOYML_DIR, metadata)
                 
-                typer.echo(f"\n✅ Auto-teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                typer.echo(f"\n Auto-teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
                 typer.echo(f"   (in {duration_hours} hours)")
                 typer.echo(f"   To cancel: deployml teardown cancel --config-path {config_path}")
             
@@ -1313,7 +1325,7 @@ def deploy(
                 try:
                     outputs = json.loads(output_proc.stdout)
                     if outputs:
-                        typer.echo("\n📦 DeployML Outputs:")
+                        typer.echo("\n DeployML Outputs:")
                         for key, value in outputs.items():
                             is_sensitive = value.get("sensitive", False)
                             output_type = value.get("type")
@@ -1367,19 +1379,19 @@ def deploy(
                     else:
                         typer.echo("No outputs found in Terraform state.")
                 except Exception as e:
-                    typer.echo(f"⚠️ Failed to parse Terraform outputs: {e}")
+                    typer.echo(f"WARNING:Failed to parse Terraform outputs: {e}")
             else:
-                typer.echo("⚠️ Could not retrieve Terraform outputs.")
+                typer.echo("WARNING:Could not retrieve Terraform outputs.")
         else:
             log_file = DEPLOYML_TERRAFORM_DIR / "terraform_apply.log"
-            typer.secho(f"\n❌ Terraform apply failed with exit code {result_code}", fg=typer.colors.RED, bold=True)
-            typer.echo(f"\n📋 Check the Terraform log for details:")
+            typer.secho(f"\n Terraform apply failed with exit code {result_code}", fg=typer.colors.RED, bold=True)
+            typer.echo(f"\n Check the Terraform log for details:")
             typer.echo(f"   {log_file}")
-            typer.echo(f"\n💡 Common issues:")
+            typer.echo(f"\n Common issues:")
             typer.echo("   - Required GCP APIs may not be enabled (check log for API activation URLs)")
             typer.echo("   - Insufficient IAM permissions")
             typer.echo("   - Resource conflicts or quota limits")
-            typer.echo("\n🔍 Last 20 lines of the log:")
+            typer.echo("\n Last 20 lines of the log:")
             if log_file.exists():
                 try:
                     with open(log_file, 'r') as f:
@@ -1390,7 +1402,7 @@ def deploy(
                     pass
             raise typer.Exit(code=1)
     else:
-        typer.echo("❌ Deployment cancelled")
+        typer.echo(" Deployment cancelled")
 
 
 @cli.command()
@@ -1412,7 +1424,7 @@ def destroy(
     Destroy infrastructure and optionally clean up workspace and Terraform state files.
     """
     if not config_path.exists():
-        typer.echo(f"❌ Config file not found: {config_path}")
+        typer.echo(f" Config file not found: {config_path}")
         raise typer.Exit(code=1)
 
     config = yaml.safe_load(config_path.read_text())
@@ -1426,7 +1438,7 @@ def destroy(
     DEPLOYML_MODULES_DIR = DEPLOYML_DIR / "terraform" / "modules"
 
     if not DEPLOYML_TERRAFORM_DIR.exists():
-        typer.echo(f"⚠️ No workspace found for {workspace_name}")
+        typer.echo(f"WARNING:No workspace found for {workspace_name}")
         typer.echo(
             "Nothing to destroy - infrastructure may already be cleaned up."
         )
@@ -1439,19 +1451,19 @@ def destroy(
 
     # Confirmation unless auto-approve
 
-    typer.echo(f"\n⚠️  About to DESTROY infrastructure for: {workspace_name}")
-    typer.echo(f"📁 Workspace: {DEPLOYML_DIR}")
+    typer.echo(f"\nWARNING: About to DESTROY infrastructure for: {workspace_name}")
+    typer.echo(f" Workspace: {DEPLOYML_DIR}")
     typer.echo(f"🌐 Project: {project_id}")
     typer.echo("This will permanently delete all resources!")
 
     if not (
         yes or typer.confirm("Are you sure you want to destroy all resources?")
     ):
-        typer.echo("❌ Destroy cancelled")
+        typer.echo(" Destroy cancelled")
         return
 
     try:
-        typer.echo(f"💥 Destroying infrastructure...")
+        typer.echo(f" Destroying infrastructure...")
 
         # Set GCP project
         subprocess.run(
@@ -1477,20 +1489,20 @@ def destroy(
         result = subprocess.run(cmd, cwd=DEPLOYML_TERRAFORM_DIR, check=False)
 
         if result.returncode == 0:
-            typer.echo("✅ Infrastructure destroyed successfully!")
+            typer.echo(" Infrastructure destroyed successfully!")
 
             if clean_workspace:
-                typer.echo("🧹 Cleaning workspace...")
+                typer.echo(" Cleaning workspace...")
                 shutil.rmtree(DEPLOYML_DIR)
-                typer.echo("✅ Workspace cleaned")
+                typer.echo(" Workspace cleaned")
             elif typer.confirm("Clean up Terraform state files?"):
                 cleanup_terraform_files(DEPLOYML_TERRAFORM_DIR)
         else:
-            typer.echo(f"❌ Destroy failed: {result.stderr}")
+            typer.echo(f" Destroy failed: {result.stderr}")
             raise typer.Exit(code=1)
 
     except Exception as e:
-        typer.echo(f"❌ Error during destroy: {e}")
+        typer.echo(f" Error during destroy: {e}")
         raise typer.Exit(code=1)
 
 
@@ -1513,7 +1525,7 @@ def teardown(
     Manage auto-teardown: cancel scheduled teardown, check status, update schedule, or schedule new teardown.
     """
     if not config_path.exists():
-        typer.echo(f"❌ Config file not found: {config_path}")
+        typer.echo(f" Config file not found: {config_path}")
         raise typer.Exit(code=1)
     
     config = yaml.safe_load(config_path.read_text())
@@ -1529,7 +1541,7 @@ def teardown(
     elif action == "schedule":
         schedule_teardown(config, DEPLOYML_DIR, workspace_name)
     else:
-        typer.echo(f"❌ Unknown action: {action}. Use: cancel, status, update, or schedule")
+        typer.echo(f" Unknown action: {action}. Use: cancel, status, update, or schedule")
         raise typer.Exit(code=1)
 
 
@@ -1548,14 +1560,14 @@ def cancel_teardown(config: dict, deployml_dir: Path, workspace_name: str):
     )
     
     if result.returncode == 0:
-        typer.echo("✅ Scheduled teardown cancelled")
+        typer.echo(" Scheduled teardown cancelled")
         # Update metadata
         metadata = load_deployment_metadata(deployml_dir)
         if metadata:
             metadata["teardown_enabled"] = False
             save_deployment_metadata(deployml_dir, metadata)
     else:
-        typer.echo(f"⚠️ Could not cancel teardown: {result.stderr}")
+        typer.echo(f"WARNING:Could not cancel teardown: {result.stderr}")
         typer.echo("   The scheduler job may not exist or may have already been deleted.")
 
 
@@ -1574,14 +1586,14 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
     )
     
     if result.returncode != 0:
-        typer.echo(f"⚠️ Cloud Scheduler job not found: {scheduler_job_name}")
+        typer.echo(f"WARNING:Cloud Scheduler job not found: {scheduler_job_name}")
         typer.echo("   Teardown may not be scheduled or may have already been cancelled.")
         
         # Check local metadata as fallback
         metadata = load_deployment_metadata(deployml_dir)
         if metadata and metadata.get("teardown_enabled"):
             teardown_at = datetime.fromisoformat(metadata["teardown_scheduled_at"])
-            typer.echo(f"\n📋 Local metadata shows teardown was scheduled for:")
+            typer.echo(f"\n Local metadata shows teardown was scheduled for:")
             typer.echo(f"   {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         return
     
@@ -1589,7 +1601,7 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
     try:
         job_info = json.loads(result.stdout)
     except json.JSONDecodeError:
-        typer.echo("❌ Failed to parse Cloud Scheduler job information")
+        typer.echo(" Failed to parse Cloud Scheduler job information")
         return
     
     # Extract information
@@ -1600,16 +1612,15 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
     last_attempt_time = job_info.get("lastAttemptTime", "")
     
     # Display comprehensive status
-    typer.echo("📋 Auto-Teardown Status")
+    typer.echo(" Auto-Teardown Status")
     typer.echo("=" * 60)
     
     # Job state
-    state_emoji = "✅" if state == "ENABLED" else "⏸️" if state == "PAUSED" else "❌"
-    typer.echo(f"{state_emoji} Status: {state}")
+    typer.echo(f"Status: {state}")
     
     # Cron schedule
-    typer.echo(f"📅 Cron Schedule: {schedule}")
-    typer.echo(f"🌍 Timezone: {time_zone}")
+    typer.echo(f" Cron Schedule: {schedule}")
+    typer.echo(f" Timezone: {time_zone}")
     
     # Next execution time
     if schedule_time:
@@ -1620,20 +1631,20 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
             # Get current UTC time as timezone-aware
             from datetime import timezone
             now = datetime.now(timezone.utc)
-            typer.echo(f"⏰ Next Execution: {next_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            typer.echo(f" Next Execution: {next_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
             
             if now < next_run:
                 time_remaining = next_run - now
                 hours = int(time_remaining.total_seconds() // 3600)
                 minutes = int((time_remaining.total_seconds() % 3600) // 60)
-                typer.echo(f"   ⏳ Time Remaining: {hours}h {minutes}m")
+                typer.echo(f"    Time Remaining: {hours}h {minutes}m")
             else:
                 time_passed = now - next_run
                 hours_passed = int(time_passed.total_seconds() // 3600)
                 minutes_passed = int((time_passed.total_seconds() % 3600) // 60)
-                typer.echo(f"   ⚠️  Scheduled time passed {hours_passed}h {minutes_passed}m ago")
+                typer.echo(f"   WARNING: Scheduled time passed {hours_passed}h {minutes_passed}m ago")
         except Exception as e:
-            typer.echo(f"⏰ Next Execution: {schedule_time}")
+            typer.echo(f" Next Execution: {schedule_time}")
     
     # Last attempt
     if last_attempt_time and last_attempt_time != "1970-01-01T00:00:00Z":
@@ -1641,17 +1652,17 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
             # Parse ISO format with Z suffix (UTC)
             time_str = last_attempt_time.replace('Z', '+00:00')
             last_run = datetime.fromisoformat(time_str)
-            typer.echo(f"🕐 Last Execution: {last_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            typer.echo(f" Last Execution: {last_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         except Exception:
-            typer.echo(f"🕐 Last Execution: {last_attempt_time}")
+            typer.echo(f" Last Execution: {last_attempt_time}")
     else:
-        typer.echo("🕐 Last Execution: Never")
+        typer.echo(" Last Execution: Never")
     
     # Job name for reference
-    typer.echo(f"\n📌 Job Name: {scheduler_job_name}")
+    typer.echo(f"\n Job Name: {scheduler_job_name}")
     
     # Actions
-    typer.echo("\n💡 Actions:")
+    typer.echo("\n Actions:")
     typer.echo(f"   Update: deployml teardown update --config-path <config-file>")
     typer.echo(f"   Cancel: deployml teardown cancel --config-path <config-file>")
     typer.echo(f"   View in Console: https://console.cloud.google.com/cloudscheduler/jobs/edit/{region}/{scheduler_job_name}?project={project_id}")
@@ -1672,7 +1683,7 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
     )
     
     if result.returncode != 0:
-        typer.echo(f"❌ Cloud Scheduler job not found: {scheduler_job_name}")
+        typer.echo(f" Cloud Scheduler job not found: {scheduler_job_name}")
         typer.echo("   Cannot update schedule. The teardown job may not exist.")
         typer.echo("   Use 'deployml deploy' with teardown.enabled: true to create it.")
         raise typer.Exit(code=1)
@@ -1685,7 +1696,7 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
         time_zone = "UTC"
     
     # Prompt for new schedule
-    typer.echo("📅 Update Teardown Schedule")
+    typer.echo(" Update Teardown Schedule")
     typer.echo("=" * 60)
     
     # Show current schedule
@@ -1694,7 +1705,7 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
         if schedule_time:
             time_str = schedule_time.replace('Z', '+00:00')
             current_time = datetime.fromisoformat(time_str)
-            typer.echo(f"⏰ Current Schedule: {current_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            typer.echo(f" Current Schedule: {current_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
     except Exception:
         pass
     
@@ -1702,7 +1713,7 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
     duration_hours = typer.prompt("Hours until new teardown time", default=24, type=int)
     
     if duration_hours < 0:
-        typer.echo("❌ Duration must be positive")
+        typer.echo(" Duration must be positive")
         raise typer.Exit(code=1)
     
     # Calculate new teardown time
@@ -1713,16 +1724,16 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
     teardown_scheduled_timestamp = int(teardown_at.timestamp())
     new_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
     
-    typer.echo(f"\n⏰ New Schedule: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    typer.echo(f"\n New Schedule: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
     
     # Confirm update
     confirm = typer.confirm("Update the teardown schedule?", default=True)
     if not confirm:
-        typer.echo("❌ Update cancelled")
+        typer.echo(" Update cancelled")
         return
     
     # Update Cloud Scheduler job
-    typer.echo("\n🔄 Updating Cloud Scheduler job...")
+    typer.echo("\n Updating Cloud Scheduler job...")
     typer.echo(f"   Cron schedule: {new_cron_schedule}")
     update_result = subprocess.run(
         [
@@ -1738,7 +1749,7 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
     )
     
     if update_result.returncode != 0:
-        typer.echo(f"❌ Failed to update schedule: {update_result.stderr}")
+        typer.echo(f" Failed to update schedule: {update_result.stderr}")
         if update_result.stdout:
             typer.echo(f"   stdout: {update_result.stdout}")
         raise typer.Exit(code=1)
@@ -1760,22 +1771,22 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
             if updated_schedule_time:
                 time_str = updated_schedule_time.replace('Z', '+00:00')
                 actual_time = datetime.fromisoformat(time_str)
-                typer.echo(f"\n✅ Teardown schedule updated successfully!")
+                typer.echo(f"\n Teardown schedule updated successfully!")
                 typer.echo(f"   Scheduled time: {actual_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
                 typer.echo(f"   Cron schedule: {updated_schedule}")
                 
                 # Check if it matches what we intended
                 if actual_time.strftime('%Y-%m-%d %H:%M') != teardown_at.strftime('%Y-%m-%d %H:%M'):
-                    typer.echo(f"\n⚠️  Warning: Scheduled time differs from intended time")
+                    typer.echo(f"\nWARNING: Warning: Scheduled time differs from intended time")
                     typer.echo(f"   Intended: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
                     typer.echo(f"   Actual: {actual_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
             else:
-                typer.echo(f"✅ Teardown schedule updated successfully!")
+                typer.echo(f" Teardown schedule updated successfully!")
                 typer.echo(f"   Cron schedule: {updated_schedule}")
         except Exception as e:
-            typer.echo(f"✅ Teardown schedule updated (verification failed: {e})")
+            typer.echo(f" Teardown schedule updated (verification failed: {e})")
     else:
-        typer.echo(f"✅ Teardown schedule updated successfully!")
+        typer.echo(f" Teardown schedule updated successfully!")
         typer.echo(f"   (Could not verify - check with: gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id})")
     
     # Update local metadata
@@ -1804,8 +1815,8 @@ def schedule_teardown(config: dict, deployml_dir: Path, workspace_name: str):
     }
     save_deployment_metadata(deployml_dir, metadata)
     
-    typer.echo(f"✅ Teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-    typer.echo("⚠️ Note: This only updates local metadata. To actually schedule teardown,")
+    typer.echo(f" Teardown scheduled for: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    typer.echo("WARNING:Note: This only updates local metadata. To actually schedule teardown,")
     typer.echo("   you need to redeploy with teardown.enabled: true in your config.")
 
 
@@ -1823,10 +1834,10 @@ def init(
     """
     if provider == "gcp":
         if not project_id:
-            typer.echo("❌ --project-id is required for GCP.")
+            typer.echo(" --project-id is required for GCP.")
             raise typer.Exit(code=1)
         typer.echo(
-            f"🔑 Enabling required GCP APIs for project: {project_id} ..."
+            f" Enabling required GCP APIs for project: {project_id} ..."
         )
         result = subprocess.run(
             [
@@ -1839,9 +1850,9 @@ def init(
             ]
         )
         if result.returncode == 0:
-            typer.echo("✅ All required GCP APIs are enabled.")
+            typer.echo(" All required GCP APIs are enabled.")
         else:
-            typer.echo("❌ Failed to enable one or more GCP APIs.")
+            typer.echo(" Failed to enable one or more GCP APIs.")
             raise typer.Exit(code=1)
     elif provider == "aws":
         typer.echo(
@@ -1852,7 +1863,7 @@ def init(
             "No API enablement required for most Azure services. Register providers if needed."
         )
     else:
-        typer.echo(f"❌ Unknown provider: {provider}")
+        typer.echo(f" Unknown provider: {provider}")
         raise typer.Exit(code=1)
 
 
@@ -2144,7 +2155,7 @@ def gke_apply(
         typer.echo("Either config.gke.zone or config.gke.region must be specified")
         raise typer.Exit(code=1)
     
-    typer.echo(f"🚀 Applying GKE manifests")
+    typer.echo(f" Applying GKE manifests")
     typer.echo(f"   Cluster: {cluster_name}")
     typer.echo(f"   Location: {zone or region_gke}")
     typer.echo(f"   Manifests: {manifests_dir}")
