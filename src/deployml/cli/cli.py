@@ -628,7 +628,7 @@ def generate():
     display_banner("Welcome to DeployML Stack Generator!")
     typer.echo("\n")
     name = prompt("MLOps Stack name", "stack")
-    provider = show_menu("  Select Provider", CloudProvider, CloudProvider.GCP)
+    provider = show_menu("  Select Provider", [CloudProvider.GCP], CloudProvider.GCP)
 
     # Import DeploymentType here to avoid circular imports
     from deployml.enum.deployment_type import DeploymentType
