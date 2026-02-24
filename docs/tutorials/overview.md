@@ -2,6 +2,28 @@
 
 Learn how to deploy a simple MLOps infrastructure using deployml.
 
+## Quick Start
+
+Once all dependencies are installed, there are six primary steps to using deployml:
+
+1. Create a project in GCP unless you are deploying everything locally with minikube.   
+2. Initialize a project with `deployml init`.   
+3. Generate and edit a configuration yaml file. Use `deployml generate` to create the file and then open in a text editor to edit it.  
+4. Deploy your infrastructure using `deployml deploy`.  
+5. Develop, deploy, and maintain your ML model. See example in the tutorials section for more guidance on this step.  
+6. Destroy the infrastructure using `deployml destroy`.  
+
+```bash
+# Initialize GCP project
+deployml init --provider gcp --project-id YOUR_PROJECT_ID
+
+# Generate a sample config
+deployml generate
+
+# Deploy your stack
+deployml deploy --config-path your-config.yaml
+```
+
 ## Deployment Options
 
 ### Minikube (Local)
@@ -39,11 +61,3 @@ This infrastructure is launched entirely within a VM in the cloud.
 - Full control
 - Cost-effective for long-running services
 - [Get Started →](gcp-cloud-vm.md)
-
-## Choose Your Deployment Type
-
-| Feature | Cloud Run | GKE | Cloud VM | Minikube |
-|---------|-----------|-----|----------|----------|
-| Scaling | Automatic | Manual | Manual | N/A |
-| Cost | Pay per use | Per node | Per VM | Free |
-| Best For | Production APIs | Production workloads | Long-running services | Development |

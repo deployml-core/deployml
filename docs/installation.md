@@ -37,27 +37,9 @@ Check that you have the right dependencies. By "dependencies" we do not simply m
 
 ```
 # Run system checks
-deployml doctor --project-id YOUR_PROJECT_ID
+deployml doctor
 ```
 
-## Quick Start
+From here, install any tools that `doctor` says are not installed, and rerun the command.
 
-Once dependencies are installed, there are six primary steps to using deployml:
-
-1. Create a project in GCP unless you are deploying things locally.   
-2. Initialize a project with `deployml init`.   
-3. Generate and edit a configuration yaml file. Use `deployml generate` to create the file and then open in a text editor to edit it.  
-4. Deploy your infrastructure using `deployml deploy`.  
-5. Develop, deploy, and maintain your ML model. See example in the tutorials section for more guidance on this step.  
-6. Destroy the infrastructure using `deployml destroy`.  
-
-```bash
-# Initialize GCP project
-deployml init --provider gcp --project-id YOUR_PROJECT_ID
-
-# Generate a sample config
-deployml generate
-
-# Deploy your stack
-deployml deploy --config-path your-config.yaml
-```
+- [Get Started →](tutorials/overview.md)
