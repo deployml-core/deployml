@@ -1,6 +1,6 @@
 # Minikube Local Deployment
 
-Deploy MLFlow and FastAPI locally using minikube for testing and development. Note that this infrastructure does NOT include all the components of the MLOps pipeline - it is limited to MLFlow and FastAPI and is meant for practice with Kubernetes before moving to the cloud. deployml only generates the manifest (which then may need to be edited) and then creates the deployment in minikube.
+Deploy MLFlow and FastAPI locally using minikube for testing and development. Note that this infrastructure does NOT include all the components of the MLOps pipeline - it is limited to MLFlow and FastAPI and is meant for **practice with Kubernetes** before moving to the cloud. deployml only generates the manifest (which then may need to be edited) and then creates the deployment in minikube.
 
 ## Overview
 
@@ -22,7 +22,7 @@ minikube version
 
 ## Example
 
-deployml is only used for generating the manifest and then deploying in minikube. In order to deploy MLFlow and FastAPI in minikube, we will need the Docker images for both.
+deployml is only used for generating the manifest and then deploying in minikube. In order to deploy MLFlow and FastAPI in minikube, we will need to create the Docker images for both. The corresponding dockerfiles can be found [here](https://github.com/deployml-core/deployml/tree/main/docker-images).
 
 ### 1. Initialize Minikube for MLflow
 

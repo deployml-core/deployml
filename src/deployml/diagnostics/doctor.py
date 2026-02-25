@@ -511,7 +511,7 @@ class DeployMLDoctor:
                 else:
                     return 'color: blue'
             
-            styled_df = df[['name', 'status', 'message', 'fix_command']].style.applymap(
+            styled_df = df[['name', 'status', 'message', 'fix_command']].style.map(
                 color_status, subset=['status']
             )
             

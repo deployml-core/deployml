@@ -6,16 +6,19 @@ Learn how to deploy a simple MLOps infrastructure using deployml.
 
 Once all dependencies are installed, there are six primary steps to using deployml:
 
-1. Create a project in GCP unless you are deploying everything locally with minikube.   
-2. Initialize a project with `deployml init`.   
+1. Create a project in GCP (unless you are deploying everything locally with minikube).   
+2. Initialize a project with `deployml init`. This will enable the necessary APIs in your GCP project. You can check that APIs are enabled by running `doctor`.  
 3. Generate and edit a configuration yaml file. Use `deployml generate` to create the file and then open in a text editor to edit it.  
 4. Deploy your infrastructure using `deployml deploy`.  
-5. Develop, deploy, and maintain your ML model. See example in the tutorials section for more guidance on this step.  
+5. Develop, deploy, and maintain your ML model. See example tutorials below for more guidance on this step.  
 6. Destroy the infrastructure using `deployml destroy`.  
 
 ```bash
 # Initialize GCP project
 deployml init --provider gcp --project-id YOUR_PROJECT_ID
+
+# Check APIs
+deployml doctor --project-id YOUR_PROJECT_ID
 
 # Generate a sample config
 deployml generate
@@ -25,15 +28,6 @@ deployml deploy --config-path your-config.yaml
 ```
 
 ## Deployment Options
-
-### Minikube (Local)
-
-This infrastructure will use minikube and will be deployed locally, which is useful for practicing with Kubernetes locally before going to the cloud. Note that this is limited to deploying MLFlow and FastAPI, and still requires knowledge of minikube and kubectl commands.
-
-- Local testing
-- No cloud costs
-- Fast iteration
-- [Get Started →](minikube.md)
 
 ### Cloud Run (Serverless)
 
@@ -61,3 +55,12 @@ This infrastructure is launched entirely within a VM in the cloud.
 - Full control
 - Cost-effective for long-running services
 - [Get Started →](gcp-cloud-vm.md)
+
+### Minikube (Local)
+
+This infrastructure is limited to deploying MLFlow and FastAPI locally using minikube, and is only useful for practicing with Kubernetes locally before going to the cloud. This option is **not** for deploying a full pipeline, and still requires knowledge of minikube and kubectl commands.
+
+- Local testing
+- No cloud costs
+- Fast iteration
+- [Get Started →](minikube.md)

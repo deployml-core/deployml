@@ -15,7 +15,7 @@ Cloud Run is a serverless container platform that automatically scales your appl
 
 ### 1. Create Configuration File
 
-Create `cloud-run-config.yaml`:
+You can use `deployml generate` or simply copy and paste the below file to create `cloud-run-config.yaml`:
 
 ```yaml
 name: mlflow-cloud-run
