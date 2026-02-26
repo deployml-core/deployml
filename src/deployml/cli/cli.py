@@ -23,6 +23,8 @@ import string
 from google.cloud import storage
 import hashlib
 
+from deployml.notebook.docker import build_images 
+
 # Import refactored utility functions
 from deployml.utils.helpers import (
     check,
@@ -2214,6 +2216,88 @@ def gke_apply(
         typer.echo("\n No manifests found to deploy")
         typer.echo(f"   Check: {manifests_dir}")
 
+
+@cli.command("build-images")
+def build_images_command(
+    docker_root: Path = typer.Option(
+        ...,
+        "--docker-root",
+        "-d",
+        help="Path to folder containing subfolders with Dockerfiles.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+    ),
+    gcp_project: Optional[str] = typer.Option(
+        None,
+        "--gcp-project",
+        "-p",
+        help="If provided, images will be built using Cloud Build in this GCP project.",
+    ),
+    region: str = typer.Option(
+        "us-central1",
+        "--region",
+        help="GCP region for Artifact Registry.",
+    ),
+    repository: str = typer.Option(
+        "mlops-images",
+        "--repository",
+        help="Artifact Registry repository name.",
+    ),
+    tag: str = typer.Option(
+        "latest",
+        "--tag",
+        "-t",
+        help="Image tag to apply.",
+    ),
+    create_repo: bool = typer.Option(
+        False,
+        "--create-repo",
+        help="Create the Artifact Registry repository if it does not exist (GCP mode only).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show what would be built without executing Docker or gcloud commands.",
+    ),
+):
+    """
+    Build all Docker images found in subdirectories of the given folder.
+
+    Local mode:
+        Builds using Docker.
+
+    GCP mode:
+        Uses Cloud Build and pushes to Artifact Registry.
+
+    --dry-run prints commands without executing them.
+    """
+
+    if create_repo and not gcp_project:
+        typer.secho(
+            "--create-repo can only be used with --gcp-project.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        build_images(
+            docker_root=docker_root,
+            gcp_project_id=gcp_project,
+            region=region,
+            repository=repository,
+            tag=tag,
+            create_repo=create_repo,
+            dry_run=dry_run,
+        )
+
+        if not dry_run:
+            typer.secho("Image build completed successfully.", fg=typer.colors.GREEN)
+
+    except Exception as e:
+        typer.secho(f"Error building images: {e}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
 
 def main():
     """
