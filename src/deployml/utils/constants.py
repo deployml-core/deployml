@@ -48,4 +48,5 @@ REQUIRED_GCP_APIS = [
     "monitoring.googleapis.com",
     "logging.googleapis.com",
     "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
 ]

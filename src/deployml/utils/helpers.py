@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import importlib.resources as pkg_resources
 from pathlib import Path
 from typing import Optional
 from google.cloud import storage
@@ -464,3 +465,26 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None):
             return returncode
         finally:
             f.close()  # Always close the file
+
+
+def _create_docker_folder(
+    project_root: Path,
+    overwrite: bool = False,
+) -> None:
+    docker_target = project_root / "docker"
+
+    if docker_target.exists() and not overwrite:
+        raise FileExistsError(
+            f"{docker_target} already exists. Use --overwrite to replace."
+        )
+
+    if docker_target.exists():
+        shutil.rmtree(docker_target)
+
+    docker_target.mkdir(parents=True, exist_ok=True)
+
+    templates = pkg_resources.files("deployml") / "docker"
+
+    for item in templates.iterdir():
+        if item.is_dir():
+            shutil.copytree(item, docker_target / item.name)

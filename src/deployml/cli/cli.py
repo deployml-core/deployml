@@ -36,6 +36,7 @@ from deployml.utils.helpers import (
     cleanup_cloud_sql_resources,
     cleanup_terraform_files,
     run_terraform_with_loading_bar,
+    _create_docker_folder,
 )
 from deployml.utils.infracost import (
     check_infracost_available,
@@ -709,8 +710,22 @@ def generate():
         )
 
     # Write configuration to file
-    config_filename = f"{name}.yaml"
-    import yaml
+    config_filename = "config.yaml"
+    
+    if not config_filename.exists():
+        typer.secho(
+            "config.yaml not found. Run 'mlops-infra init' first.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    if not force:
+        confirm = typer.confirm(
+            "This will overwrite the existing config.yaml. Continue?"
+        )
+        if not confirm:
+            typer.echo("Aborted.")
+            raise typer.Exit()
 
     with open(config_filename, "w") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
@@ -1830,9 +1845,23 @@ def init(
     project_id: str = typer.Option(
         "", "--project-id", "-j", help="Project ID (for GCP)"
     ),
+    path: Path = typer.Option(
+        Path.cwd(),
+        "--path",
+        help="Directory where project should be initialized.",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Overwrite existing docker folder if it exists.",
+    ),
 ):
     """
     Initialize cloud project by enabling required APIs/services before deployment.
+
+    This creates:
+      - docker/ folder with Dockerfile templates
+      - config.yaml template
     """
     if provider == "gcp":
         if not project_id:
@@ -1866,6 +1895,46 @@ def init(
         )
     else:
         typer.echo(f" Unknown provider: {provider}")
+        raise typer.Exit(code=1)
+    
+    project_root = Path(path)
+    try:
+        project_root.mkdir(parents=True, exist_ok=True)
+
+        # ----------------------------------------
+        # Create docker folder
+        # ----------------------------------------
+        _create_docker_folder(project_root, overwrite=overwrite)
+
+        # ----------------------------------------
+        # Create config.yaml
+        # ----------------------------------------
+        config_path = project_root / "config.yaml"
+
+        if config_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"{config_path} already exists. Use --overwrite to replace."
+            )
+
+        config_template = {
+            "# Run `mlops-infra generate` to create your config"
+        }
+
+        with open(config_path, "w") as f:
+            yaml.dump(config_template, f, sort_keys=False)
+
+        typer.secho("Project initialized successfully.", fg=typer.colors.GREEN)
+        typer.echo()
+        typer.echo("Created:")
+        typer.echo("  - docker/")
+        typer.echo("  - config.yaml")
+        typer.echo()
+        typer.echo("Next steps:")
+        typer.echo("  1. Edit config.yaml")
+        typer.echo("  2. Build images with: mlops-infra build-images --docker-root docker")
+
+    except Exception as e:
+        typer.secho(f"Error: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
 
