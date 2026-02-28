@@ -216,6 +216,20 @@ module "{{ stage_name }}_{{ tool.name }}" {
   {% endfor %}
 {% endfor %}
 
+# Bigquery table for features
+{% for stage in stack %}
+  {% for stage_name, tool in stage.items() %}
+    {% if stage_name == "data_store" and tool.name == "bigquery" %}
+    module "{{ stage_name }}_{{ tool.name }}" {
+  source     = "./modules/{{ tool.name }}/cloud/gcp"
+  project_id = var.project_id
+  region     = var.region
+  dataset_id = var.dataset_id
+}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+
 # Workflow orchestration (cron scheduling) module
 {% for stage in stack %}
   {% for stage_name, tool in stage.items() %}

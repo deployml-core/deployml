@@ -739,7 +739,6 @@ def generate():
         fg=typer.colors.BRIGHT_BLUE,
     )
 
-
 @cli.command()
 def terraform(
     action: str,
