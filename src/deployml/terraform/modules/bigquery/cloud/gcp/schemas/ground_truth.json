@@ -1,0 +1,5 @@
+[
+  {"name": "entity_id", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "event_timestamp", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "actual_value", "type": "FLOAT", "mode": "NULLABLE"}
+]

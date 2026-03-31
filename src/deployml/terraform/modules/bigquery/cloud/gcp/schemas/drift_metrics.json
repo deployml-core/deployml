@@ -1,0 +1,9 @@
+[
+  {"name": "metric_timestamp", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "metric_type", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "feature_name", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "value", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "window_start", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "window_end", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "model_version", "type": "STRING", "mode": "NULLABLE"}
+]

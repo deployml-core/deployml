@@ -1,0 +1,8 @@
+[
+  {"name": "prediction_id", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "entity_id", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "prediction_timestamp", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "predicted_value", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "model_version", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "feature_snapshot_timestamp", "type": "TIMESTAMP", "mode": "NULLABLE"}
+]
