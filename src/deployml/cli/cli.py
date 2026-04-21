@@ -1620,16 +1620,30 @@ def destroy(
                     capture_output=True,
                 )
 
-        # Check if we have Cloud SQL resources and clean them up first
-        plan_result = subprocess.run(
-            ["terraform", "plan", "-destroy"],
+        # Remove Cloud SQL databases and user from Terraform state so Terraform
+        # doesn't try to delete them individually — the instance deletion handles
+        # that automatically, avoiding active-connection errors on destroy.
+        state_result = subprocess.run(
+            ["terraform", "state", "list"],
             cwd=DEPLOYML_TERRAFORM_DIR,
             capture_output=True,
             text=True,
         )
-
-        if "google_sql_database_instance" in plan_result.stdout:
-            cleanup_cloud_sql_resources(DEPLOYML_TERRAFORM_DIR, project_id)
+        if state_result.returncode == 0:
+            resources_to_remove = [
+                r.strip() for r in state_result.stdout.splitlines()
+                if any(x in r for x in [
+                    "google_sql_database.",
+                    "google_sql_user.",
+                ])
+            ]
+            for resource in resources_to_remove:
+                typer.echo(f" Removing from state: {resource}")
+                subprocess.run(
+                    ["terraform", "state", "rm", resource],
+                    cwd=DEPLOYML_TERRAFORM_DIR,
+                    capture_output=True,
+                )
 
         # Build destroy command
         cmd = ["terraform", "destroy", "--auto-approve"]

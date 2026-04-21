@@ -90,7 +90,7 @@ resource "google_sql_database" "feast_db" {
   instance = google_sql_database_instance.postgres.name
   project  = var.project_id
   depends_on = [null_resource.verify_instance_running]
-  
+
   lifecycle {
     ignore_changes = [name]
   }
@@ -102,7 +102,7 @@ resource "google_sql_database" "metrics_db" {
   instance = google_sql_database_instance.postgres.name
   project  = var.project_id
   depends_on = [null_resource.verify_instance_running]
-  
+
   lifecycle {
     ignore_changes = [name]
   }
@@ -114,9 +114,8 @@ resource "google_sql_user" "users" {
   password = random_password.db_password.result
   project  = var.project_id
   depends_on = [null_resource.verify_instance_running]
-  
+
   lifecycle {
-    # Retry on failure in case instance is still starting
     create_before_destroy = true
   }
 }

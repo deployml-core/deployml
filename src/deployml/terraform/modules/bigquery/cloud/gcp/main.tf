@@ -10,6 +10,7 @@ resource "google_bigquery_dataset" "mlops" {
   project    = var.project_id
 
   schema = file("${path.module}/schemas/drift_metrics.json")
+  deletion_protection = false
 }
 
 resource "google_bigquery_table" "ground_truth" {
@@ -18,6 +19,7 @@ resource "google_bigquery_table" "ground_truth" {
   project    = var.project_id
 
   schema = file("${path.module}/schemas/ground_truth.json")
+  deletion_protection = false
 }
 
 resource "google_bigquery_table" "offline_features" {
@@ -26,6 +28,7 @@ resource "google_bigquery_table" "offline_features" {
   project    = var.project_id
 
   schema = file("${path.module}/schemas/offline_features.json")
+  deletion_protection = false
 }
 
 resource "google_bigquery_table" "predictions" {
@@ -34,5 +37,6 @@ resource "google_bigquery_table" "predictions" {
   project    = var.project_id
 
   schema = file("${path.module}/schemas/predictions.json")
+  deletion_protection = false
 }
 

@@ -295,8 +295,8 @@ def cleanup_cloud_sql_resources(terraform_dir: Path, project_id: str):
             capture_output=True,
             text=True,
         )
-        # Give the instance a moment to fully restart before Terraform runs
-        _time.sleep(10)
+        # Give the instance time to fully restart and drop all connections
+        _time.sleep(30)
         print("✅ Cloud SQL connections cleared")
 
     except Exception as e:
