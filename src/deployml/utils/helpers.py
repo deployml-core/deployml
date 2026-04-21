@@ -257,97 +257,38 @@ def estimate_terraform_time(plan_output: str, operation: str = "apply") -> str:
 
 def cleanup_cloud_sql_resources(terraform_dir: Path, project_id: str):
     """
-    Clean up Cloud SQL database and user before destroying the instance.
+    Terminate all Cloud SQL connections before destroy so Terraform can cleanly
+    delete databases and users. We just restart the instance — that kills all
+    active connections — and let Terraform handle the actual resource deletion.
     """
     import subprocess
     import time as _time
 
     try:
-        # Get the instance name from terraform state
         result = subprocess.run(
             ["terraform", "output", "-raw", "instance_connection_name"],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
         )
-        if result.returncode == 0:
-            instance_connection_name = result.stdout.strip()
-            # Extract instance name from connection name (format: project:region:instance)
-            parts = instance_connection_name.split(":")
-            instance_name = parts[2] if len(parts) == 3 else instance_connection_name
+        if result.returncode != 0:
+            return
 
-            print("🗄️  Cleaning up Cloud SQL resources (terminate connections, drop DBs, drop users)...")
+        instance_connection_name = result.stdout.strip()
+        parts = instance_connection_name.split(":")
+        instance_name = parts[2] if len(parts) == 3 else instance_connection_name
 
-            # Restart instance to terminate all connections (most reliable non-interactive method)
-            restart_cmd = [
-                "gcloud",
-                "sql",
-                "instances",
-                "restart",
-                instance_name,
-                "--project",
-                project_id,
-                "--quiet",
-            ]
-            subprocess.run(restart_cmd, capture_output=True, text=True)
-            _time.sleep(5)
+        print(f"🗄️  Restarting Cloud SQL instance to close active connections: {instance_name}")
+        subprocess.run(
+            ["gcloud", "sql", "instances", "restart", instance_name,
+             "--project", project_id, "--quiet"],
+            capture_output=True,
+            text=True,
+        )
+        # Give the instance a moment to fully restart before Terraform runs
+        _time.sleep(10)
+        print("✅ Cloud SQL connections cleared")
 
-            # List existing databases to avoid failing on non-existent ones
-            list_db_cmd = [
-                "gcloud",
-                "sql",
-                "databases",
-                "list",
-                "--instance",
-                instance_name,
-                "--project",
-                project_id,
-                "--format=value(name)",
-            ]
-            list_proc = subprocess.run(list_db_cmd, capture_output=True, text=True)
-            existing_dbs = set(list_proc.stdout.strip().splitlines()) if list_proc.returncode == 0 else set()
-
-            # Attempt to delete known course DBs if present
-            target_dbs = ["mlflow", "feast", "metrics"]
-            for db_name in target_dbs:
-                if db_name in existing_dbs:
-                    delete_db_cmd = [
-                        "gcloud",
-                        "sql",
-                        "databases",
-                        "delete",
-                        db_name,
-                        "--instance",
-                        instance_name,
-                        "--project",
-                        project_id,
-                        "--quiet",
-                    ]
-                    # Retry a few times in case connections are still draining
-                    for attempt in range(3):
-                        proc = subprocess.run(delete_db_cmd, capture_output=True, text=True)
-                        if proc.returncode == 0:
-                            break
-                        _time.sleep(5)
-
-            # Drop common users after DBs are removed
-            target_users = ["mlflow", "feast", "metrics"]
-            for user in target_users:
-                drop_user_cmd = [
-                    "gcloud",
-                    "sql",
-                    "users",
-                    "delete",
-                    user,
-                    "--instance",
-                    instance_name,
-                    "--project",
-                    project_id,
-                    "--quiet",
-                ]
-                subprocess.run(drop_user_cmd, capture_output=True, text=True)
-
-            print("✅ Cloud SQL cleanup completed (best-effort)")
     except Exception as e:
         print(f"⚠️  Cloud SQL cleanup failed (continuing with destroy): {e}")
 
@@ -377,7 +318,7 @@ def cleanup_terraform_files(terraform_dir: Path):
     print("✅ Cleanup completed")
 
 
-def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None):
+def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verbose=False):
     """
     Run a subprocess command with a loading bar using rich.progress.
     Progress messages are based on the stack/resources from the YAML config if provided.
@@ -413,7 +354,18 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None):
 
     # Log output to file for debugging
     log_file = cwd / "terraform_apply.log"
-    
+
+    if verbose:
+        with open(log_file, "w") as f:
+            process = subprocess.Popen(
+                cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            for line in iter(process.stdout.readline, ""):
+                print(line, end="", flush=True)
+                f.write(line)
+            returncode = process.wait()
+        return returncode
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -422,7 +374,7 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None):
         TimeElapsedColumn(),
     ) as progress:
         task = progress.add_task(resource_msgs[0], total=100)
-        
+
         # Open log file and keep it open until process completes
         f = open(log_file, "w")
         try:
@@ -441,7 +393,7 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None):
                     # If we exceed estimated time, slowly approach 95%
                     excess_time = elapsed - estimated_seconds
                     progress_percent = min(95, 85 + int(excess_time / 30))  # +1% per 30 seconds
-                
+
                 # Choose message based on progress
                 msg_idx = min(
                     int(progress_percent / (100 / (n_msgs - 1))), n_msgs - 2
@@ -451,17 +403,17 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None):
                     task, completed=progress_percent, description=message
                 )
                 time.sleep(1)
-            
+
             # Wait for process to fully complete and flush all output
             returncode = process.wait()
             f.flush()  # Ensure all output is written
-            
+
             # Only show 100% if returncode is 0 (success)
             if returncode == 0:
                 progress.update(task, completed=100, description=resource_msgs[-1])
             else:
                 progress.update(task, completed=progress_percent, description=f"⚠️ Terraform apply returned code {returncode}")
-            
+
             return returncode
         finally:
             f.close()  # Always close the file

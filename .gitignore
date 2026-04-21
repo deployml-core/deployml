@@ -25,6 +25,9 @@ mlflow.db
 
 # Ignore .env file
 .venv/
+.env
 .env/
+local/.env
+local/mlflow-artifacts/
 
 demo

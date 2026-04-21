@@ -14,9 +14,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Hardcoded MLflow configuration
-MLFLOW_TRACKING_URI = "http://mlflow-service:5000"
-MODEL_NAME = "HousingPriceModel"
+# MLflow configuration — override via MLFLOW_TRACKING_URI env var
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow-service:5000")
+MODEL_NAME = os.getenv("MODEL_NAME", "HousingPriceModel")
 
 # Global model variable
 model = None

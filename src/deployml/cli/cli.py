@@ -788,6 +788,9 @@ def deploy(
     generate_only: bool = typer.Option(
         False, "--generate-only", "-g", help="Only generate manifests, do not apply (for GKE deployments)"
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Stream Terraform logs to stdout instead of showing progress bar"
+    ),
 ):
     """
     Deploy infrastructure based on a YAML configuration file.
@@ -1027,6 +1030,34 @@ def deploy(
 
     typer.echo(f" Unified bucket creation: {create_artifact_bucket}")
 
+    # Auto-resolve image URIs: if a service image is not specified in the config (or still
+    # points to a legacy gcr.io path), derive it from the Artifact Registry path that
+    # `deployml build-images` produces: {region}-docker.pkg.dev/{project}/mlops-images/{name}
+    # This keeps the YAML config free of hardcoded image URIs — project/region are enough.
+    _TOOL_IMAGE_NAMES = {
+        "mlflow": "mlflow",
+        "feast": "feast",
+        "fastapi": "fastapi",
+        "grafana": "grafana-container",
+        "wandb": "wandb",
+    }
+    _ar_base = f"{region}-docker.pkg.dev/{project_id}/mlops-images"
+    for stage in stack:
+        for stage_name, tool in stage.items():
+            tool_name = tool.get("name", "")
+            params = tool.setdefault("params", {})
+            existing_image = params.get("image", "")
+            if not existing_image or existing_image.startswith("gcr.io/"):
+                image_name = _TOOL_IMAGE_NAMES.get(tool_name)
+                if image_name:
+                    params["image"] = f"{_ar_base}/{image_name}:latest"
+            # Cron job images are per-job and must be set explicitly — skip here
+            if stage_name == "workflow_orchestration" and tool_name == "cron":
+                for job in params.get("jobs", []):
+                    if not job.get("image") or job.get("image", "").startswith("gcr.io/"):
+                        job_name = job.get("service_name", "")
+                        job["image"] = f"{_ar_base}/{job_name}:latest"
+
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
     # PATCH: Use wandb_main.tf.j2 or mlflow_main.tf.j2 for cloud_run if present
     if deployment_type == "cloud_run":
@@ -1253,6 +1284,7 @@ def deploy(
             ["terraform", "apply", "-auto-approve"],
             DEPLOYML_TERRAFORM_DIR,
             minutes,
+            verbose=verbose,
         )
         if result_code == 0:
             typer.echo(" Deployment complete!")
@@ -1486,6 +1518,29 @@ def destroy(
             ["gcloud", "config", "set", "project", project_id],
             cwd=DEPLOYML_TERRAFORM_DIR,
         )
+
+        # Shut down Cloud Run services first to close any open DB connections
+        # before attempting to destroy Cloud SQL — otherwise active connections
+        # prevent database/user deletion and the destroy fails.
+        region = config.get("provider", {}).get("region", "us-central1")
+        cr_result = subprocess.run(
+            ["gcloud", "run", "services", "list",
+             "--project", project_id,
+             "--region", region,
+             "--format", "value(metadata.name)"],
+            capture_output=True, text=True
+        )
+        if cr_result.returncode == 0:
+            services = [s.strip() for s in cr_result.stdout.splitlines() if s.strip()]
+            for service in services:
+                typer.echo(f" Deleting Cloud Run service: {service}")
+                subprocess.run(
+                    ["gcloud", "run", "services", "delete", service,
+                     "--project", project_id,
+                     "--region", region,
+                     "--quiet"],
+                    capture_output=True,
+                )
 
         # Check if we have Cloud SQL resources and clean them up first
         plan_result = subprocess.run(

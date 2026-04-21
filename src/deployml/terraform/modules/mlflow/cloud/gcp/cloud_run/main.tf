@@ -38,10 +38,17 @@ resource "google_cloud_run_service" "mlflow" {
           name  = "MLFLOW_SERVER_HOST"
           value = "0.0.0.0"
         }
-        
+
         env {
           name  = "MLFLOW_SERVER_PORT"
           value = "8080"
+        }
+
+        # Allow all host headers — required for Cloud Run since the Host header
+        # is the dynamic *.run.app URL which MLflow's DNS rebinding check rejects by default
+        env {
+          name  = "MLFLOW_SERVER_ALLOWED_HOSTS"
+          value = "*"
         }
         
         # Backend store URI

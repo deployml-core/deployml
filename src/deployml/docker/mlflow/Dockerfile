@@ -1,5 +1,5 @@
 # Build for Linux/amd64 platform (not Apple Silicon)
-FROM --platform=linux/amd64 python:3.11-slim
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
@@ -35,5 +35,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
 # Default command - MLflow server
-CMD ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000"]
+# Uses PORT env var so it works on Cloud Run (PORT=8080) and locally (PORT=5000)
+CMD mlflow server --host 0.0.0.0 --port ${PORT:-5000} --dev
 

@@ -1,6 +1,6 @@
 {% extends "gcp/cloud_run/base_main.tf.j2" %}
 
-{% set flags = namespace(needs_postgres=false) %}
+{% set flags = namespace(needs_postgres=false, has_grafana=false) %}
 {% for stage in stack %}
   {% for stage_name, tool in stage.items() %}
     {% if tool.name == "mlflow" and tool.params.get("backend_store_uri", "") == "postgresql" %}
@@ -8,6 +8,9 @@
     {% endif %}
     {% if tool.name == "feast" and tool.params.get("backend_store_uri", "") == "postgresql" %}
       {% set flags.needs_postgres = true %}
+    {% endif %}
+    {% if stage_name == "model_monitoring" and tool.name == "grafana" %}
+      {% set flags.has_grafana = true %}
     {% endif %}
   {% endfor %}
 {% endfor %}
@@ -44,6 +47,8 @@ module "cloud_sql_postgres" {
   db_instance_name = "mlflow-postgres-{{ project_id }}"
   db_name         = "mlflow"
   db_user         = "mlflow"
+  # Create the metrics DB when Grafana is in the stack so it has a backend to connect to
+  create_metrics_db = {{ "true" if flags.has_grafana else "false" }}
 }
 
 
