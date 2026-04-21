@@ -1,66 +1,31 @@
 # Tutorials Overview
 
-Learn how to deploy a simple MLOps infrastructure using deployml.
+Learn how to deploy a full MLOps infrastructure using deployml.
 
-## Quick Start
+## GCP Cloud Run
 
-Once all dependencies are installed, there are six primary steps to using deployml:
+The primary supported deployment target is GCP using Cloud Run — a serverless architecture that scales automatically and is cost-effective for academic use.
 
-1. Create a project in GCP (unless you are deploying everything locally with minikube).   
-2. Initialize a project with `deployml init`. This will enable the necessary APIs in your GCP project. You can check that APIs are enabled by running `doctor`.  
-3. Generate and edit a configuration yaml file. Use `deployml generate` to create the file and then open in a text editor to edit it.  
-4. Deploy your infrastructure using `deployml deploy`.  
-5. Develop, deploy, and maintain your ML model. See example tutorials below for more guidance on this step.  
-6. Destroy the infrastructure using `deployml destroy`.  
+**[Get Started with GCP Cloud Run →](gcp-cloud-run.md)**
+
+## Quick Reference
 
 ```bash
-# Initialize GCP project
+# 1. Check dependencies
+deployml doctor
+
+# 2. Enable GCP APIs
 deployml init --provider gcp --project-id YOUR_PROJECT_ID
 
-# Check APIs
-deployml doctor --project-id YOUR_PROJECT_ID
+# 3. Build Docker images
+deployml build-images --docker-root docker --gcp-project YOUR_PROJECT_ID --region us-west1
 
-# Generate a sample config
-deployml generate
+# 4. Deploy the stack
+deployml deploy --config-path config.yaml --verbose
 
-# Deploy your stack
-deployml deploy --config-path your-config.yaml
+# 5. Get service URLs and write .env
+deployml get-urls --config-path config.yaml
+
+# 6. Tear down when done
+deployml destroy --config-path config.yaml
 ```
-
-## Deployment Options
-
-### Cloud Run (Serverless)
-
-This infrastructure will be deployed in the cloud using a serverless architecture.
-
-- Automatic scaling
-- Pay per use
-- No infrastructure management
-- [Get Started →](gcp-cloud-run.md)
-
-### GKE (Kubernetes)
-
-This infrastructure will be deployed in the cloud, with some components running in Kubernetes rather than serverless.
-
-- Production-ready
-- Full control
-- Custom configurations
-- [Get Started →](gke-deployment.md)
-
-### Cloud VM
-
-This infrastructure is launched entirely within a VM in the cloud. 
-
-- Persistent storage
-- Full control
-- Cost-effective for long-running services
-- [Get Started →](gcp-cloud-vm.md)
-
-### Minikube (Local)
-
-This infrastructure is limited to deploying MLFlow and FastAPI locally using minikube, and is only useful for practicing with Kubernetes locally before going to the cloud. This option is **not** for deploying a full pipeline, and still requires knowledge of minikube and kubectl commands.
-
-- Local testing
-- No cloud costs
-- Fast iteration
-- [Get Started →](minikube.md)

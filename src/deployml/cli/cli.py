@@ -1454,6 +1454,84 @@ def deploy(
 
 
 @cli.command()
+def get_urls(
+    config_path: Path = typer.Option(
+        ..., "--config-path", "-c", help="Path to YAML config file"
+    ),
+    env_path: Path = typer.Option(
+        Path(".env"), "--env-path", help="Path to write .env file"
+    ),
+):
+    """
+    Print service URLs from the last deployment and write them to a .env file.
+    """
+    if not config_path.exists():
+        typer.echo(f" Config file not found: {config_path}")
+        raise typer.Exit(code=1)
+
+    config = yaml.safe_load(config_path.read_text())
+    workspace_name = config.get("name") or "development"
+    terraform_dir = Path.cwd() / ".deployml" / workspace_name / "terraform"
+
+    if not terraform_dir.exists():
+        typer.echo(f" No deployment found at {terraform_dir}. Run 'deployml deploy' first.")
+        raise typer.Exit(code=1)
+
+    output_proc = subprocess.run(
+        ["terraform", "output", "-json"],
+        cwd=terraform_dir,
+        capture_output=True,
+        text=True,
+    )
+    if output_proc.returncode != 0:
+        typer.echo(" Could not retrieve Terraform outputs. Is the stack deployed?")
+        raise typer.Exit(code=1)
+
+    try:
+        outputs = json.loads(output_proc.stdout)
+    except Exception:
+        typer.echo(" Failed to parse Terraform outputs.")
+        raise typer.Exit(code=1)
+
+    if not outputs:
+        typer.echo("No outputs found. Is the stack deployed?")
+        raise typer.Exit(code=1)
+
+    typer.echo("\n DeployML Outputs:")
+    env_lines = []
+    for key, value in outputs.items():
+        is_sensitive = value.get("sensitive", False)
+        output_val = value.get("value")
+        env_key = key.upper()
+        if is_sensitive:
+            typer.secho(f"  {key}: [SENSITIVE] (value hidden)", fg=typer.colors.YELLOW)
+        elif isinstance(output_val, str):
+            if output_val.startswith("http://") or output_val.startswith("https://"):
+                typer.secho(f"  {key}: {output_val}", fg=typer.colors.BRIGHT_BLUE, bold=True)
+                env_lines.append(f"{env_key}={output_val}")
+            elif output_val == "":
+                typer.secho(f"  {key}: [No value]", fg=typer.colors.YELLOW)
+            else:
+                typer.echo(f"  {key}: {output_val}")
+                env_lines.append(f"{env_key}={output_val}")
+        elif isinstance(output_val, dict):
+            typer.echo(f"  {key}:")
+            for subkey, subval in output_val.items():
+                sub_env_key = f"{env_key}_{subkey.upper()}"
+                if isinstance(subval, str) and (subval.startswith("http://") or subval.startswith("https://")):
+                    typer.secho(f"    {subkey}: {subval}", fg=typer.colors.BRIGHT_BLUE, bold=True)
+                    env_lines.append(f"{sub_env_key}={subval}")
+                elif isinstance(subval, str) and subval:
+                    typer.echo(f"    {subkey}: {subval}")
+                    env_lines.append(f"{sub_env_key}={subval}")
+        else:
+            typer.echo(f"  {key}: {output_val}")
+
+    env_path.write_text("\n".join(env_lines) + "\n")
+    typer.echo(f"\n .env written to {env_path.resolve()}")
+
+
+@cli.command()
 def destroy(
     config_path: Path = typer.Option(
         ..., "--config-path", "-c", help="Path to YAML config file"

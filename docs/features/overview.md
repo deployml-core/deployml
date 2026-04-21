@@ -1,49 +1,43 @@
 # Features Overview
 
-deployml is a Python library designed to simplify the deployment of end-to-end MLOps infrastructure in the cloud. Built specifically for academia, deployml enables instructors and students to focus on learning MLOps concepts rather than struggling with infrastructure setup.
+deployml is a Python library that deploys a complete MLOps infrastructure in GCP with a single command. It was built for academic use — the goal is to get the infrastructure out of the way so students can focus on the ML.
 
-## Core Capabilities
+## How it works
 
-### Infrastructure as Code
+You define your stack in a YAML config file, run `deployml deploy`, and Terraform provisions everything in GCP. When you're done, `deployml destroy` tears it all down cleanly.
 
-deployml uses [Terraform](https://developer.hashicorp.com/terraform) to provision cloud infrastructure declaratively. Instead of manually configuring services through cloud consoles, you define your entire MLOps stack in a simple YAML configuration file. This approach provides several key benefits: reproducible deployments that work consistently across environments, version-controlled infrastructure that can be tracked in Git, easy teardown and cleanup when projects are complete, and elimination of manual configuration errors.
+## What gets deployed
 
-### Cost Analysis
+### Experiment Tracking, Artifact Storage, and Model Registry — MLflow
 
-Understanding cloud costs before deployment is crucial, especially in academic settings with limited budgets. deployml integrates with [Infracost](https://github.com/infracost/infracost) to provide cost estimates before any infrastructure is provisioned. You'll see monthly cost projections for your entire stack, receive warnings if costs exceed your configured threshold, and get cost breakdowns by component. This helps prevent unexpected bills and allows for better budget planning.
+A single MLflow server running in Cloud Run, backed by:
+- Cloud SQL (Postgres) for experiment metadata
+- GCS bucket for model artifacts
 
-### Multi-Cloud Support
+Use it to track experiments, store models, and manage model versions.
 
-Currently focused on Google Cloud Platform (GCP), deployml supports multiple deployment types to match different use cases. Cloud Run provides serverless, auto-scaling container deployments ideal for APIs and services with variable traffic. Google Kubernetes Engine (GKE) offers Kubernetes deployments with full control over cluster configuration. Cloud VM enables persistent virtual machine deployments for long-running services that need stable storage. Minikube support allows for local development and testing without any cloud costs.
+### Model Serving — FastAPI
 
-### ML-Focused Components
+A FastAPI container running in Cloud Run. On startup it pulls the latest registered model from MLflow and serves predictions at `/predict`.
 
-deployml comes pre-configured with essential MLOps tools that work together seamlessly. The platform supports experiment tracking through MLflow, allowing you to log parameters, metrics, and artifacts from your ML experiments. Model registry capabilities enable centralized model versioning and stage management. Feature store integration with [Feast](https://feast.dev/) provides consistent features across training and serving. [FastAPI](https://fastapi.tiangolo.com/) endpoints make it easy to deploy models as production-ready APIs. [Grafana](https://grafana.com/) dashboards offer monitoring and visualization capabilities. Workflow orchestration through cron jobs enables scheduled training, scoring, and monitoring tasks.
+### Model Monitoring — Grafana
 
+A Grafana container running in Cloud Run, connected to a `metrics` Postgres database. Use it to build dashboards for tracking model performance over time.
 
-## What deployml Provides
+### Feature and Monitoring Tables — BigQuery
 
-deployml provisions infrastructure for a complete MLOps pipeline covering all major stages of the machine learning lifecycle:  
+Four BigQuery tables are created automatically in the `mlops` dataset:
 
-- Experiment tracking allows you to track ML experiments and compare results across different runs.   
-- Artifact tracking stores and versions model artifacts, datasets, and other ML assets.  
-- Model registry provides centralized model versioning and management with stage transitions.   
-- Feature store manages features for both training and serving with consistency guarantees.   
-- Online model serving deploys models as API endpoints that can be integrated into applications.  
-- Offline model serving deploys models using an orchestration engine.  
-- Model monitoring tracks model performance, drift, and system health.   
-- Workflow orchestration schedules and runs training and scoring jobs automatically.
+| Table | Purpose |
+|---|---|
+| `offline_features` | Precomputed input features for training and serving |
+| `predictions` | Model predictions logged at serving time |
+| `ground_truth` | Actual outcomes, matched back to predictions |
+| `drift_metrics` | Summary statistics for monitoring model drift |
 
-## What's Not Included
+## What's not included (yet)
 
-deployml focuses on traditional ML workflows and does not include tooling for LLMs and generative AI, scalable model development frameworks, or data versioning and data pipelines. These areas may be added in future releases based on community needs.
-
-## Use Cases
-
-### For Instructors
-
-Instructors teaching MLOps courses can use deployml to quickly set up lab environments for students, demonstrate MLOps concepts with real infrastructure, manage costs effectively with auto-teardown features, and provide reproducible deployment examples that students can follow.
-
-### For Students
-
-Students learning MLOps can use deployml to gain hands-on experience without getting bogged down in infrastructure complexity, practice with production-like environments, understand cloud deployment patterns, and focus their time on ML workflows rather than infrastructure setup.
+- AWS and Azure support (planned)
+- Data versioning
+- LLMs / generative AI
+- Scalable model training

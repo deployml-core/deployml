@@ -99,9 +99,19 @@ def copy_modules_to_workspace(
     if teardown_enabled:
         used_modules.add("teardown")
 
+    # BigQuery is always included — provides the mlops dataset and tables
+    used_modules.add("bigquery")
+
     # Only copy the modules that are being used, and only the specific deployment type
     for module_path in MODULE_TEMPLATES_DIR.iterdir():
         if module_path.is_dir() and module_path.name in used_modules:
+            # Special case: always copy full bigquery module
+            if module_path.name == "bigquery":
+                dest_module_path = modules_dir / module_path.name
+                if dest_module_path.exists():
+                    shutil.rmtree(dest_module_path)
+                shutil.copytree(module_path, dest_module_path)
+                continue
             # Special case: always copy full cloud_sql_postgres module
             if module_path.name == "cloud_sql_postgres":
                 dest_module_path = modules_dir / module_path.name

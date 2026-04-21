@@ -293,69 +293,57 @@ module "{{ stage_name }}_{{ tool.name }}" {
     {% endif %}
   {% endfor %}
 {% endfor %}
+module "bigquery" {
+  source     = "./modules/bigquery/cloud/gcp"
+  project_id = var.project_id
+  region     = var.region
+  dataset_id = "mlops"
+}
 {% endblock %}
 
 {% block outputs %}
+# MLflow — single URL and bucket regardless of how many stack stages use it
+{% set mlflow_stage = namespace(found=false, name="") %}
 {% for stage in stack %}
   {% for stage_name, tool in stage.items() %}
-    {% if tool.name == "mlflow" %}
-output "{{ stage_name }}_mlflow_url" {
-  value = var.enable_{{ stage_name }}_mlflow && length(module.{{ stage_name }}_mlflow) > 0 ? module.{{ stage_name }}_mlflow[0].service_url : ""
-}
-output "{{ stage_name }}_mlflow_bucket" {
-  value = var.enable_{{ stage_name }}_mlflow && length(module.{{ stage_name }}_mlflow) > 0 ? module.{{ stage_name }}_mlflow[0].bucket_name : ""
-}
+    {% if tool.name == "mlflow" and not mlflow_stage.found %}
+      {% set mlflow_stage.found = true %}
+      {% set mlflow_stage.name = stage_name %}
     {% endif %}
   {% endfor %}
 {% endfor %}
-{% if create_artifact_bucket %}
-{% for stage in stack %}
-  {% for stage_name, tool in stage.items() %}
-    {% if tool.name == "mlflow" and tool.params.get("artifact_bucket") %}
-output "{{ stage_name }}_mlflow_artifact_bucket" {
-  value = google_storage_bucket.{{ stage_name }}_mlflow_artifact.name
+{% if mlflow_stage.found %}
+output "mlflow_url" {
+  value = var.enable_{{ mlflow_stage.name }}_mlflow && length(module.{{ mlflow_stage.name }}_mlflow) > 0 ? module.{{ mlflow_stage.name }}_mlflow[0].service_url : ""
 }
-    {% endif %}
-  {% endfor %}
-{% endfor %}
+output "artifact_bucket" {
+  value = var.enable_{{ mlflow_stage.name }}_mlflow && length(module.{{ mlflow_stage.name }}_mlflow) > 0 ? module.{{ mlflow_stage.name }}_mlflow[0].bucket_name : ""
+}
 {% endif %}
 {% if flags.needs_postgres %}
-output "instance_connection_name" {
-  value = module.cloud_sql_postgres.instance_connection_name
-}
 output "postgresql_credentials" {
   value = module.cloud_sql_postgres.postgresql_credentials
   sensitive = true
 }
 {% endif %}
-
-# Output for Grafana if present
-{% for stage in stack %}
-  {% for stage_name, tool in stage.items() %}
-    {% if stage_name == "model_monitoring" and tool.name == "grafana" %}
-output "{{ stage_name }}_{{ tool.name }}_url" {
-  value = length(module.{{ stage_name }}_{{ tool.name }}) > 0 ? module.{{ stage_name }}_{{ tool.name }}[0].service_url : ""
+output "bigquery_dataset" {
+  value = module.bigquery.dataset_id
 }
-    {% endif %}
-  {% endfor %}
-{% endfor %}
 
-# Output for FastAPI model serving if present
 {% for stage in stack %}
   {% for stage_name, tool in stage.items() %}
     {% if stage_name == "model_serving" and tool.name == "fastapi" %}
-output "{{ stage_name }}_{{ tool.name }}_url" {
+output "fastapi_url" {
   value = length(module.{{ stage_name }}_{{ tool.name }}) > 0 ? module.{{ stage_name }}_{{ tool.name }}[0].service_url : ""
 }
     {% endif %}
-  {% endfor %}
-{% endfor %}
-
-# Output for Feast feature store if present
-{% for stage in stack %}
-  {% for stage_name, tool in stage.items() %}
+    {% if stage_name == "model_monitoring" and tool.name == "grafana" %}
+output "grafana_url" {
+  value = length(module.{{ stage_name }}_{{ tool.name }}) > 0 ? module.{{ stage_name }}_{{ tool.name }}[0].service_url : ""
+}
+    {% endif %}
     {% if stage_name == "feature_store" and tool.name == "feast" %}
-output "{{ stage_name }}_{{ tool.name }}_url" {
+output "feast_url" {
   value = length(module.{{ stage_name }}_{{ tool.name }}) > 0 ? module.{{ stage_name }}_{{ tool.name }}[0].service_url : ""
 }
     {% endif %}
