@@ -50,6 +50,10 @@ resource "google_cloud_run_service" "mlflow" {
           name  = "MLFLOW_SERVER_ALLOWED_HOSTS"
           value = "*"
         }
+        env {
+          name  = "MLFLOW_SERVER_DISABLE_SECURITY_MIDDLEWARE"
+          value = "true"
+        }
         
         # Backend store URI
         dynamic "env" {

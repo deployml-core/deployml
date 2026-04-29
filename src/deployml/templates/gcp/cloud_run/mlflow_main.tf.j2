@@ -151,6 +151,7 @@ module "{{ stage_name }}_{{ tool.name }}" {
   {% endfor %}
   feast_service_url = {{ 'length(module.feature_store_feast) > 0 ? module.feature_store_feast[0].service_url : ""' if feast_exists.value else '""' }}
   enable_feast_connection = {{ 'true' if feast_exists.value else 'false' }}
+  bigquery_dataset = "mlops"
   {% if feast_exists.value %}
   depends_on = [module.feature_store_feast]
   {% endif %}

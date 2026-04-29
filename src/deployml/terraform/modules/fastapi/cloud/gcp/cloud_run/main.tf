@@ -51,6 +51,10 @@ resource "google_cloud_run_service" "fastapi" {
           name  = "GOOGLE_CLOUD_PROJECT"
           value = var.project_id
         }
+        env {
+          name  = "BIGQUERY_DATASET"
+          value = var.bigquery_dataset
+        }
         resources {
           limits = {
             cpu    = var.cpu_limit
@@ -116,7 +120,7 @@ resource "google_project_iam_member" "fastapi_storage_object_admin" {
 
 resource "google_project_iam_member" "fastapi_bigquery_user" {
   project = var.project_id
-  role    = "roles/bigquery.user"
+  role    = "roles/bigquery.dataEditor"
   member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
 }
 

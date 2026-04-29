@@ -36,5 +36,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 # Default command - MLflow server
 # Uses PORT env var so it works on Cloud Run (PORT=8080) and locally (PORT=5000)
-CMD mlflow server --host 0.0.0.0 --port ${PORT:-5000} --dev
+CMD mlflow server --host 0.0.0.0 --port ${PORT:-5000} --dev --allowed-hosts '*'
 

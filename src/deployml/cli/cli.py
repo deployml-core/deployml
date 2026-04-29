@@ -4,6 +4,7 @@ import typer
 import shutil
 import subprocess
 import re
+import importlib.resources as pkg_resources
 from deployml.utils.banner import display_banner
 from deployml.utils.menu import prompt, show_menu
 from deployml.utils.constants import (
@@ -780,7 +781,7 @@ def terraform(
 @cli.command()
 def deploy(
     config_path: Path = typer.Option(
-        ..., "--config-path", "-c", help="Path to YAML config file"
+        Path("config.yaml"), "--config-path", "-c", help="Path to YAML config file"
     ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip confirmation prompts and deploy"
@@ -1456,7 +1457,7 @@ def deploy(
 @cli.command()
 def get_urls(
     config_path: Path = typer.Option(
-        ..., "--config-path", "-c", help="Path to YAML config file"
+        Path("config.yaml"), "--config-path", "-c", help="Path to YAML config file"
     ),
     env_path: Path = typer.Option(
         Path(".env"), "--env-path", help="Path to write .env file"
@@ -1471,6 +1472,7 @@ def get_urls(
 
     config = yaml.safe_load(config_path.read_text())
     workspace_name = config.get("name") or "development"
+    project_id = config.get("provider", {}).get("project_id", "")
     terraform_dir = Path.cwd() / ".deployml" / workspace_name / "terraform"
 
     if not terraform_dir.exists():
@@ -1527,6 +1529,10 @@ def get_urls(
         else:
             typer.echo(f"  {key}: {output_val}")
 
+    if project_id:
+        env_lines.append(f"BIGQUERY_PROJECT={project_id}")
+        typer.echo(f"  bigquery_project: {project_id}")
+
     env_path.write_text("\n".join(env_lines) + "\n")
     typer.echo(f"\n .env written to {env_path.resolve()}")
 
@@ -1534,7 +1540,7 @@ def get_urls(
 @cli.command()
 def destroy(
     config_path: Path = typer.Option(
-        ..., "--config-path", "-c", help="Path to YAML config file"
+        Path("config.yaml"), "--config-path", "-c", help="Path to YAML config file"
     ),
     workspace: Optional[str] = typer.Option(
         None, "--workspace", help="Override workspace name from config"
@@ -2434,15 +2440,17 @@ def gke_apply(
 
 @cli.command("build-images")
 def build_images_command(
-    docker_root: Path = typer.Option(
-        ...,
+    config_path: Path = typer.Option(
+        Path("config.yaml"),
+        "--config-path",
+        "-c",
+        help="Path to YAML config file. Used to infer project and region automatically.",
+    ),
+    docker_root: Optional[Path] = typer.Option(
+        None,
         "--docker-root",
         "-d",
-        help="Path to folder containing subfolders with Dockerfiles.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        resolve_path=True,
+        help="Path to folder containing subfolders with Dockerfiles. Defaults to the built-in deployml docker directory.",
     ),
     gcp_project: Optional[str] = typer.Option(
         None,
@@ -2450,10 +2458,10 @@ def build_images_command(
         "-p",
         help="If provided, images will be built using Cloud Build in this GCP project.",
     ),
-    region: str = typer.Option(
-        "us-central1",
+    region: Optional[str] = typer.Option(
+        None,
         "--region",
-        help="GCP region for Artifact Registry.",
+        help="GCP region for Artifact Registry. Inferred from config if not set.",
     ),
     repository: str = typer.Option(
         "mlops-images",
@@ -2489,12 +2497,26 @@ def build_images_command(
     --dry-run prints commands without executing them.
     """
 
+    if config_path and config_path.exists():
+        config = yaml.safe_load(config_path.read_text())
+        if not gcp_project:
+            gcp_project = config.get("provider", {}).get("project_id")
+        if not region:
+            region = config.get("provider", {}).get("region", "us-central1")
+
+    if not region:
+        region = "us-central1"
+
     if create_repo and not gcp_project:
         typer.secho(
             "--create-repo can only be used with --gcp-project.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(code=1)
+
+    if docker_root is None:
+        docker_root = Path(str(pkg_resources.files("deployml") / "docker"))
+        typer.echo(f"Using built-in docker directory: {docker_root}")
 
     try:
         build_images(

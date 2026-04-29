@@ -93,4 +93,10 @@ variable "mlflow_bucket_exists" {
   type        = bool
   description = "Whether the MLflow artifact bucket already exists"
   default     = false
-} 
+}
+
+variable "bigquery_dataset" {
+  type        = string
+  description = "BigQuery dataset name for storing predictions"
+  default     = "mlops"
+}

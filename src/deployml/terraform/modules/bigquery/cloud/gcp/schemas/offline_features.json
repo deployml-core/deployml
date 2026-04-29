@@ -1,7 +1,12 @@
 [
   {"name": "entity_id", "type": "STRING", "mode": "REQUIRED"},
   {"name": "event_timestamp", "type": "TIMESTAMP", "mode": "REQUIRED"},
-  {"name": "feature_1", "type": "FLOAT", "mode": "NULLABLE"},
-  {"name": "feature_2", "type": "FLOAT", "mode": "NULLABLE"},
-  {"name": "feature_3", "type": "FLOAT", "mode": "NULLABLE"}
+  {"name": "bedrooms", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "bathrooms", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "area_sqft", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "lot_size", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "year_built", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "city", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "state", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "price", "type": "FLOAT", "mode": "NULLABLE"}
 ]

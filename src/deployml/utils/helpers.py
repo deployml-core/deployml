@@ -196,22 +196,16 @@ def generate_unique_bucket_name(base_name: str, project_id: str) -> str:
 
 def generate_bucket_name(project_id: str) -> str:
     """
-    Generate a random, human-readable GCS bucket name for the given project.
+    Generate a stable, deterministic GCS bucket name for the given project.
+    Uses project_id (globally unique on GCP) so the name is consistent across deploys.
 
     Args:
         project_id (str): The GCP project ID.
 
     Returns:
-        str: A generated bucket name.
+        str: A deterministic bucket name.
     """
-    if random.random() < 0.7:
-        word = random.choice(ANIMAL_NAMES)
-    else:
-        word = random.choice(FALLBACK_WORDS)
-    suffix = "".join(
-        random.choices(string.ascii_lowercase + string.digits, k=4)
-    )
-    return f"{word}-bucket-{project_id}-{suffix}".replace("_", "-")
+    return f"mlflow-artifacts-{project_id}".replace("_", "-")
 
 
 def estimate_terraform_time(plan_output: str, operation: str = "apply") -> str:
