@@ -14,7 +14,7 @@ Run this before anything else. Checks for `gcloud`, `docker`, `terraform`, and `
 
 ## `deployml init`
 
-Enable required GCP APIs for a project. Run once per project.
+Enable required GCP APIs for a project and create the Artifact Registry repository. Run once per project.
 
 ```bash
 deployml init --provider gcp --project-id YOUR_PROJECT_ID
@@ -28,16 +28,17 @@ deployml init --provider gcp --project-id YOUR_PROJECT_ID
 
 ## `deployml build-images`
 
-Build Docker images from your `docker/` folder and push them to GCP Artifact Registry.
+Build Docker images and push them to GCP Artifact Registry. Reads project ID and region from `config.yaml` by default.
 
 ```bash
-deployml build-images --docker-root docker --gcp-project YOUR_PROJECT_ID --region us-west1
+deployml build-images
 ```
 
 **Options:**
-- `--docker-root`, `-d`: Path to folder containing Dockerfiles (required)
-- `--gcp-project`, `-p`: GCP project ID
-- `--region`: GCP region (default: `us-central1`)
+- `--config-path`, `-c`: Path to config YAML file (default: `config.yaml`)
+- `--docker-root`, `-d`: Path to folder containing Dockerfiles (default: built-in package images)
+- `--gcp-project`, `-p`: GCP project ID (default: inferred from config)
+- `--region`: GCP region (default: inferred from config)
 - `--repository`: Artifact Registry repository name (default: `mlops-images`)
 - `--tag`: Image tag (default: `latest`)
 
@@ -48,11 +49,11 @@ deployml build-images --docker-root docker --gcp-project YOUR_PROJECT_ID --regio
 Deploy infrastructure from a YAML config file.
 
 ```bash
-deployml deploy --config-path config.yaml --verbose
+deployml deploy --verbose
 ```
 
 **Options:**
-- `--config-path`, `-c`: Path to config YAML file (required)
+- `--config-path`, `-c`: Path to config YAML file (default: `config.yaml`)
 - `--verbose`, `-v`: Stream Terraform logs instead of showing a progress bar
 - `--yes`, `-y`: Skip confirmation prompts
 
@@ -63,11 +64,11 @@ deployml deploy --config-path config.yaml --verbose
 Print service URLs from the last deployment and write them to a `.env` file.
 
 ```bash
-deployml get-urls --config-path config.yaml
+deployml get-urls
 ```
 
 **Options:**
-- `--config-path`, `-c`: Path to config YAML file (required)
+- `--config-path`, `-c`: Path to config YAML file (default: `config.yaml`)
 - `--env-path`: Where to write the `.env` file (default: `.env`)
 
 ---
@@ -77,10 +78,10 @@ deployml get-urls --config-path config.yaml
 Tear down all infrastructure for a given config.
 
 ```bash
-deployml destroy --config-path config.yaml
+deployml destroy
 ```
 
 **Options:**
-- `--config-path`, `-c`: Path to config YAML file (required)
+- `--config-path`, `-c`: Path to config YAML file (default: `config.yaml`)
 - `--clean-workspace`: Delete the local workspace folder after destroy
 - `--yes`, `-y`: Skip confirmation prompts

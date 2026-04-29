@@ -8,6 +8,12 @@ The primary supported deployment target is GCP using Cloud Run — a serverless 
 
 **[Get Started with GCP Cloud Run →](gcp-cloud-run.md)**
 
+## End-to-End Example
+
+Once deployed, walk through a complete MLOps workflow using a synthetic housing price dataset — training, registration, serving, drift monitoring, and Grafana dashboards.
+
+**[End-to-End Example →](example.md)**
+
 ## Quick Reference
 
 ```bash
@@ -18,14 +24,14 @@ deployml doctor
 deployml init --provider gcp --project-id YOUR_PROJECT_ID
 
 # 3. Build Docker images
-deployml build-images --docker-root docker --gcp-project YOUR_PROJECT_ID --region us-west1
+deployml build-images
 
 # 4. Deploy the stack
-deployml deploy --config-path config.yaml --verbose
+deployml deploy --verbose
 
 # 5. Get service URLs and write .env
-deployml get-urls --config-path config.yaml
+deployml get-urls
 
 # 6. Tear down when done
-deployml destroy --config-path config.yaml
+deployml destroy
 ```

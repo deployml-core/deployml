@@ -12,6 +12,8 @@ stack:
         service_name: mlflow-server
   - artifact_tracking:
       name: mlflow
+      params:
+        artifact_bucket: mlflow-artifacts-deployml-489218
   - model_registry:
       name: mlflow
       params:

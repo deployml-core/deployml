@@ -18,6 +18,7 @@ dist/
 
 # Miscilaneous
 vm-stack.yaml
+config.yaml
 mlflow.db
 *.csv
 *.house_data

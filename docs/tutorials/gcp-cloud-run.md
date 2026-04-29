@@ -26,7 +26,13 @@ This only needs to be run once per project. It takes a few minutes while GCP ena
 
 ## 3. Create a Configuration File
 
-Create a file called `config.yaml` in your project directory. This tells deployml which services to deploy.
+Copy the example config and fill in your project ID:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Edit `config.yaml` and replace `YOUR_GCP_PROJECT_ID` with your actual project ID:
 
 ```yaml
 name: gcp-mlops-stack-mlflow
@@ -43,6 +49,8 @@ stack:
         service_name: mlflow-server
   - artifact_tracking:
       name: mlflow
+      params:
+        artifact_bucket: mlflow-artifacts-YOUR_PROJECT_ID
   - model_registry:
       name: mlflow
       params:
@@ -65,38 +73,37 @@ stack:
 
 ## 4. Build Docker Images
 
-deployml ships with example Dockerfiles for each service. Run `init` first to copy these into your project's `docker/` folder, then build and push them to Artifact Registry:
+Build and push the service images to Artifact Registry:
 
 ```bash
-deployml build-images --docker-root docker --gcp-project YOUR_PROJECT_ID --region us-west1
+deployml build-images
 ```
 
-This builds images for MLflow, FastAPI, and Grafana and pushes them to:
+This reads your project ID and region from `config.yaml` and pushes images for MLflow, FastAPI, and Grafana to:
 `us-west1-docker.pkg.dev/YOUR_PROJECT_ID/mlops-images/`
 
-Building takes a few minutes. You only need to rebuild if you change a Dockerfile or the application code inside a container.
+Building takes a few minutes. You only need to rebuild if you change a Dockerfile or application code inside a container.
 
 ## 5. Deploy
 
 ```bash
-deployml deploy --config-path config.yaml --verbose
+deployml deploy --verbose
 ```
 
-`--verbose` streams Terraform output directly so you can see what's being created. Without it you get a progress bar. Deployment takes roughly 5–10 minutes.
+`--verbose` streams Terraform output directly so you can see what's being created. Without it you get a progress bar. The first deployment takes roughly 20 minutes — Cloud SQL Postgres takes 15-20 minutes to provision.
 
 What gets created:
 
 - Cloud SQL Postgres instance with `mlflow` and `metrics` databases
 - GCS bucket for MLflow artifacts
-- Artifact Registry repository (if not already created by `init`)
 - Cloud Run services for MLflow, FastAPI, and Grafana
+- BigQuery `mlops` dataset with four tables
 - IAM service accounts and bindings
-- VPC connector for private Cloud SQL access
 
 ## 6. Get Service URLs
 
 ```bash
-deployml get-urls --config-path config.yaml
+deployml get-urls
 ```
 
 This prints all service URLs and writes them to a `.env` file in the current directory. Example output:
@@ -107,12 +114,6 @@ This prints all service URLs and writes them to a `.env` file in the current dir
   model_monitoring_grafana_url: https://grafana-server-xxxx-uw.a.run.app
 
  .env written to /your/project/.env
-```
-
-You can source the `.env` in your shell or point your scripts at it to avoid hardcoding URLs:
-
-```bash
-source .env
 ```
 
 ## 7. Verify the Stack
@@ -147,12 +148,16 @@ bq ls --project_id=YOUR_PROJECT_ID mlops
 
 You should see `offline_features`, `predictions`, `ground_truth`, and `drift_metrics`.
 
-## 8. Teardown
+## 8. Run the End-to-End Example
+
+With the stack running, follow the [example walkthrough](example.md) to train a model, register it, serve predictions through FastAPI, and visualize drift metrics in Grafana.
+
+## 9. Teardown
 
 When you are done, destroy all infrastructure to avoid ongoing charges:
 
 ```bash
-deployml destroy --config-path config.yaml
+deployml destroy
 ```
 
 This deletes all Cloud Run services, Cloud SQL instance, GCS bucket contents, and Terraform state. It does not delete the Artifact Registry images or the GCP project itself.
@@ -164,8 +169,8 @@ This deletes all Cloud Run services, Cloud SQL instance, GCS bucket contents, an
 If a previous deploy was interrupted, you may see a lock file error. Delete the lock file and retry:
 
 ```bash
-rm ~/.deployml/YOUR_CONFIG_NAME/.terraform.lock.hcl
-deployml deploy --config-path config.yaml --verbose
+rm .deployml/YOUR_CONFIG_NAME/terraform/.terraform.lock.hcl
+deployml deploy --verbose
 ```
 
 **Service logs**

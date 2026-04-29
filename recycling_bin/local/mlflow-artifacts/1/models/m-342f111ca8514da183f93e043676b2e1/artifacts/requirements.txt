@@ -1,0 +1,7 @@
+mlflow==3.10.0
+cloudpickle==3.1.2
+numpy==2.4.4
+pandas==2.3.3
+pyarrow==23.0.1
+scikit-learn==1.8.0
+scipy==1.17.1

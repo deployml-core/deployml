@@ -1,0 +1,28 @@
+name: gcp-mlops-stack-mlflow
+provider:
+  name: gcp
+  project_id: YOUR_GCP_PROJECT_ID
+  region: us-west1
+deployment:
+  type: cloud_run
+stack:
+  - experiment_tracking:
+      name: mlflow
+      params:
+        service_name: mlflow-server
+  - artifact_tracking:
+      name: mlflow
+      params:
+        artifact_bucket: mlflow-artifacts-YOUR_GCP_PROJECT_ID
+  - model_registry:
+      name: mlflow
+      params:
+        backend_store_uri: postgresql
+  - model_serving:
+      name: fastapi
+      params:
+        service_name: fastapi-mlflow-server
+  - model_monitoring:
+      name: grafana
+      params:
+        service_name: grafana-server

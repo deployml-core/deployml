@@ -57,18 +57,18 @@ repo_name: deployml-core/deployml
 repo_url: https://github.com/deployml-core/deployml
 
 nav:
-- Getting Started: 
+- Getting Started:
   - Welcome to deployml: index.md
   - Installation: installation.md
-  - Contributing: contributing.md  
-  - Changelog: changelog.md
-- Features: 
+  - Contributing: contributing.md
+- Features:
   - Overview: features/overview.md
   - MLOps Components: features/pipeline.md
   - Cost Estimates: features/costs.md
 - Tutorials:
   - Overview: tutorials/overview.md
   - GCP Cloud Run: tutorials/gcp-cloud-run.md
+  - End-to-End Example: tutorials/example.md
 - API Reference:
   - Overview: api/overview.md
   - CLI Commands: api/cli-commands.md

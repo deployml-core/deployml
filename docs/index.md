@@ -20,10 +20,10 @@ deployml will provision the infrastructure needed for a basic end-to-end MLOps p
 
 - experiment tracking  
 - model and artifact tracking and model registration  
-- feature store   
-- ML pipelines (e.g. training and scoring pipelines)  
-- online and offline model deployment  
-- model monitoring  
+- experiment tracking and artifact storage (MLflow)
+- model registration and versioning (MLflow Model Registry)
+- model serving (FastAPI)
+- model monitoring and drift detection (Grafana + BigQuery)
 
 What is currently not included in the pipeline is:
 

@@ -1,0 +1,54 @@
+services:
+  mlflow:
+    build:
+      context: ../src/deployml/docker/mlflow
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./mlflow-artifacts:/mlflow-artifacts
+    networks:
+      mlops:
+        ipv4_address: 172.20.0.10
+    command: >
+      mlflow server
+        --host 0.0.0.0
+        --port 5000
+        --backend-store-uri sqlite:////mlflow-artifacts/mlflow.db
+        --artifacts-destination /mlflow-artifacts
+        --serve-artifacts
+        --dev
+
+  fastapi:
+    build:
+      context: ../src/deployml/docker/fastapi
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mlflow-artifacts:/mlflow-artifacts
+    env_file:
+      - .env
+    environment:
+      - MLFLOW_TRACKING_URI=http://172.20.0.10:5000
+    depends_on:
+      - mlflow
+    networks:
+      - mlops
+
+  grafana:
+    build:
+      context: ../src/deployml/docker/grafana-container
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SERVER_HTTP_PORT=3000
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    networks:
+      - mlops
+
+networks:
+  mlops:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

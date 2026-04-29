@@ -1,87 +1,92 @@
 # deployml
-Infrastructure for academia with cost analysis
 
-## Features
+A CLI tool that deploys a production MLOps stack on GCP with a single command. Built for academic ML courses so students can focus on building models, not infrastructure.
 
-- 🏗️ **Infrastructure as Code**: Deploy ML infrastructure using Terraform
-- 💰 **Cost Analysis**: Integrated infracost analysis before deployment
-- ☁️ **Multi-Cloud Support**: GCP, AWS, and more
-- 🔬 **ML-Focused**: Pre-configured for MLflow, experiment tracking, and model registry
-- 🛡️ **Production Ready**: Security best practices and service account management
+## What you get
 
-## Instructions
+- **MLflow** — experiment tracking, artifact storage, and model registry (backed by Cloud SQL Postgres + GCS)
+- **FastAPI** — model serving endpoint that loads the latest registered model from MLflow automatically
+- **Grafana** — monitoring dashboard connected to your metrics database
+- **BigQuery** — `mlops` dataset with tables for features, predictions, ground truth, and drift metrics
 
-```bash
-poetry install
-poetry run deployml doctor
-poetry run deployml deploy --config-path your-config.yaml
-```
+All running on GCP Cloud Run — no servers to manage, scales to zero when idle.
 
-docker build --platform=linux/amd64 -t gcr.io/mlops-intro-461805/mlflow/mlflow:latest .
+## Quick Start
 
-gcloud auth configure-docker docker push gcr.io/PROJECT_ID/mlflow-app:latest
-
-## Cost Analysis Integration
-
-deployml integrates with [infracost](https://www.infracost.io/) to provide cost estimates before deployment:
-
-### Installation
-```bash
-brew install infracost
-```
-Once installed you will need to create a free [infracost](https://www.infracost.io/) account before creating your API key. 
-
-To generate your infracost API key run the following command:
+**1. Install**
 
 ```bash
-infracost auth login
+pip install deployml-core
 ```
-If you want to retrieve your API key use:
+
+**2. Initialize your GCP project** (enables APIs, creates Artifact Registry)
+
 ```bash
-infracost configure get api_key
+deployml init --provider gcp --project-id YOUR_PROJECT_ID
 ```
 
-### Cost Analysis Configuration
-Add cost analysis settings to your YAML configuration:
+**3. Configure**
 
-```yaml
-name: "my-mlops-stack"
-cost_analysis:
-  enabled: true              # Enable/disable cost analysis (default: true)
-  warning_threshold: 100.0   # Warn if monthly cost exceeds this amount
-  currency: "USD"            # Currency for cost display
+```bash
+cp config.example.yaml config.yaml
+# Edit config.yaml and set your project_id
 ```
 
-## Cloud Run Service Account Setup
+**4. Build images**
 
-When deploying MLflow, you must specify the service account email that Cloud Run will use. This service account must have permission to access the artifact bucket.
-
-### How to get a service account email
-
-1. List your service accounts:
-   ```sh
-   gcloud iam service-accounts list
-   ```
-2. (Recommended) Create a dedicated service account for MLflow if you don't have one:
-   ```sh
-   gcloud iam service-accounts create mlflow-cloudrun --display-name "MLflow Cloud Run Service Account"
-   ```
-3. Find the email for your service account (it will look like `mlflow-cloudrun@YOUR_PROJECT.iam.gserviceaccount.com`).
-
-### Grant the service account permissions
-
-The Terraform module will automatically grant the service account the required permissions on the artifact bucket.
-
-### Deploying with Terraform
-
-Pass the service account email as a variable:
-
-```sh
-terraform apply -var="cloud_run_service_account=mlflow-cloudrun@YOUR_PROJECT.iam.gserviceaccount.com"
+```bash
+deployml build-images
 ```
 
-Or, if using the CLI, ensure it passes this variable to Terraform.
+**5. Deploy**
 
-### Why this is needed
+```bash
+deployml deploy --verbose
+```
 
-The MLflow server (running on Cloud Run) needs permission to list and read artifacts in the GCS bucket. This setup ensures the MLflow UI works for all users without manual permission fixes.
+First deploy takes ~20 minutes (Cloud SQL provisioning). Subsequent deploys are 1–2 minutes.
+
+**6. Get your URLs**
+
+```bash
+deployml get-urls
+```
+
+Prints service URLs and writes a `.env` file with `MLFLOW_URL`, `FASTAPI_URL`, `GRAFANA_URL`, `BIGQUERY_PROJECT`, and `BIGQUERY_DATASET`.
+
+## End-to-End Example
+
+Once deployed, the `example/` directory walks through a complete MLOps workflow using a synthetic housing price dataset:
+
+```bash
+pip install mlflow scikit-learn pandas numpy google-cloud-bigquery db-dtypes python-dotenv requests
+
+python example/scripts/01_load_training_data.py   # load 500 rows into BigQuery
+python example/scripts/02_train_model.py           # train RandomForest, log to MLflow
+python example/scripts/03_register_model.py        # register model as Production
+python example/scripts/04_make_predictions.py      # serve 50 predictions via FastAPI
+python example/scripts/05_generate_ground_truth.py # simulate actual outcomes
+python example/scripts/06_compute_drift_metrics.py # compute feature drift + MAE
+python example/scripts/07_setup_grafana.py         # provision monitoring dashboard
+```
+
+See [example/README.md](example/README.md) for details.
+
+## Teardown
+
+```bash
+deployml destroy
+```
+
+Deletes all Cloud Run services, Cloud SQL, GCS bucket, and BigQuery dataset. Does not delete Artifact Registry images or the GCP project.
+
+## Full Tutorial
+
+See [docs/tutorials/gcp-cloud-run.md](docs/tutorials/gcp-cloud-run.md) for a step-by-step walkthrough.
+
+## Requirements
+
+- Python 3.10+
+- `gcloud` CLI (authenticated)
+- Docker (running)
+- Terraform
