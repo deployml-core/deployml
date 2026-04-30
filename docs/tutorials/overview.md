@@ -24,7 +24,7 @@ deployml doctor
 deployml init --provider gcp --project-id YOUR_PROJECT_ID
 
 # 3. Build Docker images
-deployml build-images
+deployml build-images --create-repo
 
 # 4. Deploy the stack
 deployml deploy --verbose

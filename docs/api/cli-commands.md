@@ -41,6 +41,7 @@ deployml build-images
 - `--region`: GCP region (default: inferred from config)
 - `--repository`: Artifact Registry repository name (default: `mlops-images`)
 - `--tag`: Image tag (default: `latest`)
+- `--create-repo`: Create the Artifact Registry repository if it does not exist
 
 ---
 

@@ -76,7 +76,7 @@ stack:
 Build and push the service images to Artifact Registry:
 
 ```bash
-deployml build-images
+deployml build-images --create-repo
 ```
 
 This reads your project ID and region from `config.yaml` and pushes images for MLflow, FastAPI, and Grafana to:

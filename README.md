@@ -35,7 +35,7 @@ cp config.example.yaml config.yaml
 **4. Build images**
 
 ```bash
-deployml build-images
+deployml build-images --create-repo
 ```
 
 **5. Deploy**
