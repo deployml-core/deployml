@@ -46,7 +46,7 @@ from deployml.utils.helpers import (
     run_terraform_with_loading_bar,
     _create_docker_folder,
 )
-from deployml.utils.platform_compat import run_tool, resolve_tool
+from deployml.utils.platform_compat import run_tool, resolve_tool, configure_console_encoding
 from deployml.utils.infracost import (
     check_infracost_available,
     run_infracost_analysis,
@@ -3086,6 +3086,10 @@ def main():
     """
     Entry point for the DeployML CLI.
     """
+    # Force UTF-8 on the Windows console first so any emoji or box glyph in command
+    # output cannot raise UnicodeEncodeError on a legacy cp1252 console. No-op off
+    # Windows.
+    configure_console_encoding()
     cli()
 
 
