@@ -21,7 +21,7 @@ Once deployed, walk through a complete MLOps workflow using a synthetic housing 
 deployml doctor
 
 # 2. Enable GCP APIs
-deployml init --provider gcp --project-id YOUR_PROJECT_ID
+deployml init --provider gcp --project-id YOUR_GCP_PROJECT_ID
 
 # 3. Build Docker images
 deployml build-images --create-repo

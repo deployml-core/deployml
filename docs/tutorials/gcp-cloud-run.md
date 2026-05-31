@@ -1,44 +1,36 @@
 # GCP Cloud Run Tutorial
 
-This tutorial walks you through deploying a full MLOps stack on GCP using Cloud Run. By the end you will have MLflow (experiment tracking, artifact storage, model registry), FastAPI (model serving), and Grafana (monitoring dashboard) running in the cloud.
+This tutorial walks you through deploying a full MLOps stack on GCP using Cloud Run. By the end you will have MLflow, FastAPI, and Grafana running in the cloud.
 
 ## Prerequisites
 
-Make sure `deployml doctor` passes before starting. You will need:
+Run `deployml doctor --project-id YOUR_GCP_PROJECT_ID` first. It checks everything in the [installation guide](../installation.md). Make sure the IAM and API checks pass before you continue.
 
-- `gcloud` CLI, authenticated (`gcloud auth login` and `gcloud auth application-default login`)
-- Docker (running)
-- Terraform
+## 1. Create and prepare your GCP project
 
-## 1. Create a GCP Project
+1. Create a project in the [GCP Console](https://console.cloud.google.com). Note the project ID.
+2. Link a billing account. Verify with `gcloud billing projects describe YOUR_GCP_PROJECT_ID`. The output should include `billingEnabled: true`.
+3. Confirm you have a sufficient IAM role on the project. `roles/owner` is the simplest. See the [installation guide](../installation.md) for the minimum explicit set.
 
-Create a new project in the [GCP Console](https://console.cloud.google.com) and enable billing. Note your project ID — you will use it throughout this tutorial.
+## 2. Initialize the project
 
-## 2. Initialize the Project
-
-`init` enables the required GCP APIs and creates the Artifact Registry repository that your Docker images will be pushed to.
+`init` enables the required GCP APIs and creates a local `docker/` folder and `config.yaml` template.
 
 ```bash
-deployml init --provider gcp --project-id YOUR_PROJECT_ID
+deployml init --provider gcp --project-id YOUR_GCP_PROJECT_ID
 ```
 
-This only needs to be run once per project. It takes a few minutes while GCP enables APIs.
+This only needs to be run once per project. API enablement takes a few minutes.
 
-## 3. Create a Configuration File
+## 3. Review the configuration file
 
-Copy the example config and fill in your project ID:
-
-```bash
-cp config.example.yaml config.yaml
-```
-
-Edit `config.yaml` and replace `YOUR_GCP_PROJECT_ID` with your actual project ID:
+`init` already wrote a runnable `config.yaml` with your project ID filled in. Inspect it and adjust service names, region, or `image_tag` if you need to. The default looks like this:
 
 ```yaml
 name: gcp-mlops-stack-mlflow
 provider:
   name: gcp
-  project_id: YOUR_PROJECT_ID
+  project_id: YOUR_GCP_PROJECT_ID
   region: us-west1
 deployment:
   type: cloud_run
@@ -50,7 +42,7 @@ stack:
   - artifact_tracking:
       name: mlflow
       params:
-        artifact_bucket: mlflow-artifacts-YOUR_PROJECT_ID
+        artifact_bucket: mlflow-artifacts-YOUR_GCP_PROJECT_ID
   - model_registry:
       name: mlflow
       params:
@@ -67,22 +59,20 @@ stack:
 
 **What each block does:**
 
-- `experiment_tracking` + `artifact_tracking` + `model_registry` — these three together deploy a single MLflow server backed by Cloud SQL (Postgres) for metadata and a GCS bucket for artifacts
-- `model_serving` — deploys a FastAPI container that pulls the latest registered model from MLflow on startup
-- `model_monitoring` — deploys Grafana connected to the Postgres `metrics` database
+- `experiment_tracking` + `artifact_tracking` + `model_registry` together deploy a single MLflow server backed by Cloud SQL Postgres for metadata and a GCS bucket for artifacts.
+- `model_serving` deploys a FastAPI container that pulls the latest registered model from MLflow on startup.
+- `model_monitoring` deploys Grafana connected to the Postgres `metrics` database.
 
-## 4. Build Docker Images
-
-Build and push the service images to Artifact Registry:
+## 4. Build Docker images
 
 ```bash
 deployml build-images --create-repo
 ```
 
 This reads your project ID and region from `config.yaml` and pushes images for MLflow, FastAPI, and Grafana to:
-`us-west1-docker.pkg.dev/YOUR_PROJECT_ID/mlops-images/`
+`us-west1-docker.pkg.dev/YOUR_GCP_PROJECT_ID/mlops-images/`
 
-Building takes a few minutes. You only need to rebuild if you change a Dockerfile or application code inside a container.
+The first build creates the Artifact Registry repo. Subsequent runs reuse it. Builds run on Cloud Build, so you do not need a local Docker daemon for this step.
 
 ## 5. Deploy
 
@@ -90,41 +80,54 @@ Building takes a few minutes. You only need to rebuild if you change a Dockerfil
 deployml deploy --verbose
 ```
 
-`--verbose` streams Terraform output directly so you can see what's being created. Without it you get a progress bar. The first deployment takes roughly 20 minutes — Cloud SQL Postgres takes 15-20 minutes to provision.
+Deploy prompts `Do you want to deploy the stack? [y/N]` before applying. Type `y` to proceed. Pass `--yes` to skip the prompt in scripts.
+
+`--verbose` streams Terraform output directly. The first deployment takes roughly 20 minutes because Cloud SQL Postgres provisioning is slow.
 
 What gets created:
 
-- Cloud SQL Postgres instance with `mlflow` and `metrics` databases
+- Cloud SQL Postgres instance with `mlflow` and `metrics` databases. The public IP is allocated but no client network is authorized, so the DB is reachable only from Cloud Run via the Cloud SQL Auth Proxy tunnel.
 - GCS bucket for MLflow artifacts
-- Cloud Run services for MLflow, FastAPI, and Grafana
+- Cloud Run services for MLflow, FastAPI, and Grafana. MLflow runs with `min_instances = 1` to avoid cold starts on the tracking server.
 - BigQuery `mlops` dataset with four tables
 - IAM service accounts and bindings
 
-## 6. Get Service URLs
+## 6. Costs
+
+While the stack is up, expect rough monthly cost in the $30 to $80 range depending on usage:
+
+- Cloud SQL Postgres `db-g1-small`: about $25 per month, even when idle.
+- MLflow Cloud Run with `min_instances = 1`: about $5 per month for the warm instance.
+- BigQuery storage: tiny until you load real data.
+- Cloud Run for FastAPI and Grafana: scales to zero when idle.
+
+Cloud Build minutes during `build-images` are pay-per-use and usually a few cents per cycle.
+
+**Run `deployml destroy` as soon as you are done.** Cloud SQL keeps billing while running.
+
+## 7. Get service URLs
 
 ```bash
 deployml get-urls
 ```
 
-This prints all service URLs and writes them to a `.env` file in the current directory. Example output:
+This prints all service URLs and writes them to a `.env` file in the current directory. Database credentials are masked so the `.env` is safe to share with your IDE or commit to a local notebook.
 
-```
-  experiment_tracking_mlflow_url: https://mlflow-server-xxxx-uw.a.run.app
-  model_serving_fastapi_url: https://fastapi-mlflow-server-xxxx-uw.a.run.app
-  model_monitoring_grafana_url: https://grafana-server-xxxx-uw.a.run.app
+Add `--show-secrets` to additionally print the Grafana admin password and the Cloud SQL Auth Proxy connection command:
 
- .env written to /your/project/.env
+```bash
+deployml get-urls --show-secrets
 ```
 
-## 7. Verify the Stack
+## 8. Verify the stack
 
 **MLflow**
 
-Open the MLflow URL in your browser — you should see the MLflow UI with no experiments yet.
-
 ```bash
-curl https://YOUR_MLFLOW_URL/health
+curl https://YOUR_MLFLOW_URL/health   # returns OK
 ```
+
+Open the MLflow URL in your browser to see the UI.
 
 **FastAPI**
 
@@ -132,41 +135,61 @@ curl https://YOUR_MLFLOW_URL/health
 curl https://YOUR_FASTAPI_URL/health
 ```
 
-The `/docs` endpoint gives you the auto-generated OpenAPI UI.
+The `/docs` endpoint shows the auto-generated OpenAPI UI.
 
 **Grafana**
 
-Open the Grafana URL in your browser. Default credentials are `admin` / `admin`. You will be prompted to change the password on first login.
+Open the Grafana URL in your browser. Username is `admin`. The password is auto-generated and stored in Secret Manager. Fetch it with:
+
+```bash
+deployml get-urls --show-secrets
+```
+
+The output prints the password directly and also gives the secret ID so you can rotate or re-fetch later.
 
 **BigQuery**
 
-Verify the `mlops` dataset and all four tables were created:
-
 ```bash
-bq ls --project_id=YOUR_PROJECT_ID mlops
+bq ls --project_id=YOUR_GCP_PROJECT_ID mlops
 ```
 
 You should see `offline_features`, `predictions`, `ground_truth`, and `drift_metrics`.
 
-## 8. Run the End-to-End Example
+## 9. Run the end to end example
 
 With the stack running, follow the [example walkthrough](example.md) to train a model, register it, serve predictions through FastAPI, and visualize drift metrics in Grafana.
 
-## 9. Teardown
+## 10. Teardown
 
-When you are done, destroy all infrastructure to avoid ongoing charges:
+When you are done, destroy all infrastructure to stop billing:
 
 ```bash
-deployml destroy
+deployml destroy --yes
 ```
 
-This deletes all Cloud Run services, Cloud SQL instance, GCS bucket contents, and Terraform state. It does not delete the Artifact Registry images or the GCP project itself.
+`--yes` skips both the destroy confirm and the workspace cleanup prompt. This deletes all Cloud Run services, Cloud SQL instance, GCS bucket contents, and Terraform state files. It does not delete the Artifact Registry images or the GCP project itself.
+
+To free up an active project slot, also run:
+
+```bash
+gcloud projects delete YOUR_GCP_PROJECT_ID
+```
 
 ## Troubleshooting
 
-**Terraform lock file error**
+**`build-images` fails with denied: User cannot access repository**
 
-If a previous deploy was interrupted, you may see a lock file error. Delete the lock file and retry:
+You skipped `gcloud auth configure-docker us-west1-docker.pkg.dev`. Run it and retry.
+
+**`init` says Project not found or not accessible**
+
+Either the project ID is wrong, or your gcloud account does not have access. Verify with `gcloud projects describe YOUR_GCP_PROJECT_ID`.
+
+**Deploy hangs at MLflow Cloud Run creation**
+
+Check the Cloud Run logs in the link the error prints. The most common cause is a misconfigured DB connection. If you are on a fork, confirm the template passes `connection_string_cloud_sql` to MLflow rather than `connection_string`.
+
+**Terraform lock file error after an interrupted deploy**
 
 ```bash
 rm .deployml/YOUR_CONFIG_NAME/terraform/.terraform.lock.hcl
@@ -176,9 +199,74 @@ deployml deploy --verbose
 **Service logs**
 
 ```bash
-gcloud run services logs read SERVICE_NAME --project YOUR_PROJECT_ID --region us-west1
+gcloud run services logs read SERVICE_NAME --project YOUR_GCP_PROJECT_ID --region us-west1
 ```
 
-**Cloud SQL connection issues**
+**`Your active project does not match the quota project` warning**
 
-If destroy fails with an active connections error, the Cloud Run services may not have been fully shut down. Re-run destroy — it will retry the Cloud SQL cleanup.
+Not cosmetic. If the ADC quota project points at a deleted or unrelated project, BigQuery and other Google client libraries fail with `403 USER_PROJECT_DENIED`. Always run this once per fresh project before using the example scripts:
+
+```bash
+gcloud auth application-default set-quota-project YOUR_GCP_PROJECT_ID
+```
+
+**`USER_PROJECT_DENIED` or `Project ... has been deleted` in example scripts**
+
+Same root cause as above. Run the ADC quota project command.
+
+**`The project cannot be created because you have exceeded your allotted project quota`**
+
+GCP limits how many projects you can create. Each deleted project still counts against the quota during a 30-day grace period. If you are iterating on fresh test projects, you will hit this. Workarounds:
+
+- Wait for the grace period to expire.
+- Request a higher project creation quota in the [GCP Console](https://console.cloud.google.com/iam-admin/quotas).
+- Reuse one project for multiple test runs, calling `deployml destroy` between them. The drift detection in `deployml deploy` makes this safe.
+
+## GKE flow notes
+
+The `deployml gke-*` commands are an alternative to Cloud Run for users who want a Kubernetes cluster. The flow is intentionally lighter than Cloud Run and has a few sharp edges:
+
+**1. GKE uses gcr.io. Cloud Run uses Artifact Registry.**
+
+`deployml build-images --create-repo` pushes to `{region}-docker.pkg.dev/{project}/mlops-images/` (Artifact Registry). The GKE flow expects images at `gcr.io/{project}/...`. These are different registries. If you ran `build-images` for the Cloud Run flow and then try `gke-init`, the GKE manifests reference an image that does not exist. For GKE, build and push manually:
+
+```bash
+docker build --platform linux/amd64 -t gcr.io/YOUR_GCP_PROJECT_ID/fastapi/fastapi:v0.0.42 ./docker/fastapi
+docker push gcr.io/YOUR_GCP_PROJECT_ID/fastapi/fastapi:v0.0.42
+```
+
+**2. kubectl needs `gke-gcloud-auth-plugin`.**
+
+`gcloud components install gke-gcloud-auth-plugin` installs the plugin but it may not be on PATH. Without it on PATH, `kubectl get nodes` fails with `executable gke-gcloud-auth-plugin not found`.
+
+macOS with Homebrew gcloud (bash or zsh):
+
+```bash
+export PATH="/opt/homebrew/share/google-cloud-sdk/bin:$PATH"
+```
+
+Linux with gcloud installed system-wide is usually already on PATH.
+
+Windows PowerShell:
+
+```powershell
+$env:PATH = "C:\Users\$env:USERNAME\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin;" + $env:PATH
+```
+
+Windows cmd:
+
+```cmd
+set PATH=C:\Users\%USERNAME%\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin;%PATH%
+```
+
+Adjust the path if your gcloud install is elsewhere.
+
+**3. You manage the cluster yourself.**
+
+`deployml` does not create or delete GKE clusters for you. Use `gcloud container clusters create-auto` for Autopilot or `gcloud container clusters create` for standard. To tear down:
+
+```bash
+deployml gke-destroy --manifest-dir manifests --cluster gke-test --project YOUR_GCP_PROJECT_ID --region us-west1 --delete-cluster
+```
+
+`--delete-cluster` also removes the cluster. Omit it to only delete the deployed manifests.

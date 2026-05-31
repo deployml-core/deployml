@@ -3,6 +3,7 @@ provider:
   name: gcp
   project_id: YOUR_GCP_PROJECT_ID
   region: us-west1
+  image_tag: v0.0.42  # pinned. Override to your build tag if you rebuild images.
 deployment:
   type: cloud_run
 stack:
