@@ -1,13 +1,26 @@
 import subprocess
 import typer
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional
 from jinja2 import Environment, FileSystemLoader
+
+try:
+    from importlib.metadata import version as _pkg_version
+    _DEPLOYML_VERSION = _pkg_version("deployml-core")
+except Exception:
+    _DEPLOYML_VERSION = "0.0.42"
+
 from deployml.utils.constants import TEMPLATE_DIR
+from deployml.utils.kubernetes_local import ensure_namespace, ns_args
 
 
 def check_gke_cluster_connection(cluster_name: str, zone: Optional[str] = None, region: Optional[str] = None) -> bool:
-    """Check if kubectl is connected to the GKE cluster."""
+    """Check if kubectl is connected to THIS specific GKE cluster.
+
+    Earlier the function returned True if kubectl was connected to any GKE
+    cluster, which silently applied manifests to the wrong cluster. Now we
+    only return True if the current context contains the exact cluster name.
+    """
     try:
         result = subprocess.run(
             ["kubectl", "cluster-info"],
@@ -15,13 +28,12 @@ def check_gke_cluster_connection(cluster_name: str, zone: Optional[str] = None, 
             text=True
         )
         if result.returncode == 0:
-            # Check if cluster name is in context
             context_result = subprocess.run(
                 ["kubectl", "config", "current-context"],
                 capture_output=True,
                 text=True
             )
-            return cluster_name in context_result.stdout or "gke" in context_result.stdout.lower()
+            return cluster_name in context_result.stdout
         return False
     except Exception:
         return False
@@ -123,16 +135,16 @@ def generate_fastapi_manifests_gke(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Convert local image to GCR format
+    # Convert local image to GCR format. Pin tag to the deployml version to
+    # avoid the :latest drift bug that bites the Cloud Run path the same way.
     if not image.startswith("gcr.io/"):
-        gcr_image = f"gcr.io/{project_id}/fastapi/fastapi:latest"
+        gcr_image = f"gcr.io/{project_id}/fastapi/fastapi:v{_DEPLOYML_VERSION}"
         if push_image:
             push_image_to_gcr(image, gcr_image, project_id)
         image = gcr_image
     else:
         gcr_image = image
-    
-    # Default values
+
     port = 8000
     replicas = 1
     cpu_request = "250m"
@@ -200,10 +212,12 @@ def generate_mlflow_manifests_gke(
     artifact_root: Optional[str] = None,
     service_type: str = "LoadBalancer",
     push_image: bool = True,
+    use_pvc: bool = True,
+    pvc_size: str = "5Gi",
 ) -> None:
     """
-    Generate deployment.yaml and service.yaml for MLflow on GKE.
-    
+    Generate deployment.yaml, service.yaml, and optionally pvc.yaml for MLflow on GKE.
+
     Args:
         output_dir: Directory where manifests will be created
         image: Docker image for MLflow (local name)
@@ -212,19 +226,22 @@ def generate_mlflow_manifests_gke(
         artifact_root: Optional artifact root path (GCS bucket)
         service_type: Kubernetes service type (LoadBalancer or ClusterIP)
         push_image: Whether to push image to GCR
+        use_pvc: When True, provision a PersistentVolumeClaim so experiment data
+          survives pod restarts. Without it MLflow stores sqlite in the container
+          filesystem and loses everything when the pod is rescheduled.
+        pvc_size: PVC size when use_pvc=True.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Convert local image to GCR format
+    # Convert local image to GCR format. Pin tag to the deployml version.
     if not image.startswith("gcr.io/"):
-        gcr_image = f"gcr.io/{project_id}/mlflow/mlflow:latest"
+        gcr_image = f"gcr.io/{project_id}/mlflow/mlflow:v{_DEPLOYML_VERSION}"
         if push_image:
             push_image_to_gcr(image, gcr_image, project_id)
         image = gcr_image
     else:
         gcr_image = image
-    
-    # Default values
+
     port = 5000
     replicas = 1
     cpu_request = "250m"
@@ -233,9 +250,14 @@ def generate_mlflow_manifests_gke(
     memory_limit = "2Gi"  # Increased for GKE
     service_name = "mlflow-service"
     
-    # Defaults if not provided
+    # Defaults if not provided. Put sqlite on the mounted volume (4 slashes =
+    # absolute /mlflow-artifacts/mlflow.db) so the backend store persists with
+    # use_pvc. A relative sqlite:///mlflow.db would sit in the ephemeral
+    # container filesystem and be lost on restart.
     if not backend_store_uri:
-        backend_store_uri = "sqlite:///mlflow.db"
+        backend_store_uri = (
+            "sqlite:////mlflow-artifacts/mlflow.db" if use_pvc else "sqlite:///mlflow.db"
+        )
     if not artifact_root:
         artifact_root = "/mlflow-artifacts"
     
@@ -255,9 +277,10 @@ def generate_mlflow_manifests_gke(
         cpu_limit=cpu_limit,
         memory_limit=memory_limit,
         backend_store_uri=backend_store_uri,
-        artifact_root=artifact_root
+        artifact_root=artifact_root,
+        use_pvc=use_pvc,
     )
-    
+
     # Update imagePullPolicy for GCR images
     deployment_yaml = deployment_yaml.replace("imagePullPolicy: Never", "imagePullPolicy: IfNotPresent")
     
@@ -284,10 +307,17 @@ spec:
     
     deployment_file.write_text(deployment_yaml)
     service_file.write_text(service_yaml)
-    
+
     typer.echo(f"Generated MLflow GKE manifests in {output_dir}")
     typer.echo(f"   - {deployment_file}")
     typer.echo(f"   - {service_file}")
+
+    if use_pvc:
+        pvc_template = env.get_template("mlflow-pvc.yaml.j2")
+        pvc_yaml = pvc_template.render(pvc_size=pvc_size)
+        pvc_file = output_dir / "pvc.yaml"
+        pvc_file.write_text(pvc_yaml)
+        typer.echo(f"   - {pvc_file}  (PersistentVolumeClaim, {pvc_size})")
 
 
 def deploy_to_gke(
@@ -296,16 +326,20 @@ def deploy_to_gke(
     project_id: str,
     zone: Optional[str] = None,
     region: Optional[str] = None,
+    namespace: Optional[str] = None,
 ) -> bool:
     """
     Deploy manifests to GKE cluster using kubectl apply.
-    
+
     Args:
         manifest_dir: Directory containing deployment.yaml and service.yaml
         cluster_name: GKE cluster name
         project_id: GCP project ID
         zone: GKE cluster zone (for zonal clusters)
         region: GKE cluster region (for regional clusters)
+        namespace: Target namespace. Default keeps the default namespace; pass a
+          value to isolate this stack. MLflow and FastAPI must share a namespace
+          for in-cluster service DNS to resolve.
     """
     if not manifest_dir.exists():
         typer.echo(f"Directory not found: {manifest_dir}")
@@ -324,20 +358,34 @@ def deploy_to_gke(
             return False
     
     typer.echo("🚀 Applying Kubernetes manifests to GKE...")
-    
+    ensure_namespace(namespace)
+    ns = ns_args(namespace)
+
     try:
+        # Apply the PVC first so the deployment can bind it on first schedule.
+        pvc_file = manifest_dir / "pvc.yaml"
+        if pvc_file.exists():
+            typer.echo(f"   Applying {pvc_file.name}...")
+            result = subprocess.run(
+                ["kubectl", "apply", "-f", str(pvc_file)] + ns,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            typer.echo(f"   {result.stdout.strip()}")
+
         typer.echo(f"   Applying {deployment_file.name}...")
         result = subprocess.run(
-            ["kubectl", "apply", "-f", str(deployment_file)],
+            ["kubectl", "apply", "-f", str(deployment_file)] + ns,
             check=True,
             capture_output=True,
             text=True
         )
         typer.echo(f"   {result.stdout.strip()}")
-        
+
         typer.echo(f"   Applying {service_file.name}...")
         result = subprocess.run(
-            ["kubectl", "apply", "-f", str(service_file)],
+            ["kubectl", "apply", "-f", str(service_file)] + ns,
             check=True,
             capture_output=True,
             text=True
@@ -348,41 +396,51 @@ def deploy_to_gke(
         typer.echo("\n⏳ Waiting for LoadBalancer IP...")
         typer.echo("   (This may take a few minutes)")
         
-        # Wait for external IP
-        import time
-        max_wait = 300  # 5 minutes
+        # Wait for external IP. Earlier code did service_file.stem.replace("service", "service")
+        # which is a no-op and then queried kubectl for service "service" which is wrong.
+        # Read the actual service name from the rendered manifest instead.
+        import time, yaml as _yaml
+        max_wait = 300
         waited = 0
-        service_name = service_file.stem.replace("service", "service")
-        
+        try:
+            svc_doc = _yaml.safe_load(service_file.read_text())
+            service_name = svc_doc.get("metadata", {}).get("name", "")
+        except Exception:
+            service_name = ""
+
+        # Without a concrete service name we cannot safely target one service.
+        # Querying every service and guessing an IP risks reporting the wrong
+        # endpoint, so bail out and let the user inspect manually instead.
+        if not service_name:
+            typer.echo("   Could not read the service name from service.yaml; "
+                       "skipping IP wait. Run: kubectl get svc")
+            waited = max_wait
+
         while waited < max_wait:
-            result = subprocess.run(
-                ["kubectl", "get", "svc", "-o", "jsonpath='{.items[?(@.spec.type==\"LoadBalancer\")].status.loadBalancer.ingress[0].ip}'"],
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode == 0 and result.stdout.strip().strip("'"):
-                external_ip = result.stdout.strip().strip("'")
-                if external_ip and external_ip != "<none>":
-                    # Get port
-                    port_result = subprocess.run(
-                        ["kubectl", "get", "svc", service_name, "-o", "jsonpath='{.spec.ports[0].port}'"],
-                        capture_output=True,
-                        text=True
-                    )
-                    port = port_result.stdout.strip().strip("'") or "5000"
-                    typer.echo(f"\n✅ Service is available at: http://{external_ip}:{port}")
-                    break
-            
+            ip_query = "{.status.loadBalancer.ingress[0].ip}"
+            cmd = ["kubectl", "get", "svc", service_name,
+                   "-o", f"jsonpath={ip_query}"] + ns
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            external_ip = result.stdout.strip().strip("'")
+            if result.returncode == 0 and external_ip and external_ip != "<none>":
+                port_query = "{.spec.ports[0].port}"
+                port_cmd = ["kubectl", "get", "svc", service_name,
+                            "-o", f"jsonpath={port_query}"] + ns
+                port_result = subprocess.run(port_cmd, capture_output=True, text=True)
+                port = port_result.stdout.strip().strip("'") or "5000"
+                typer.echo(f"\n Service is available at: http://{external_ip}:{port}")
+                break
+
             time.sleep(5)
             waited += 5
             if waited % 30 == 0:
                 typer.echo(f"   Still waiting... ({waited}s)")
         
         typer.echo("\n Deployment status:")
-        subprocess.run(["kubectl", "get", "pods"])
-        subprocess.run(["kubectl", "get", "svc"])
-        
+        subprocess.run(["kubectl", "get", "pods"] + ns)
+        subprocess.run(["kubectl", "get", "svc"] + ns)
+
         return True
         
     except subprocess.CalledProcessError as e:
