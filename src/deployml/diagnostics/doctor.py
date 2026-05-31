@@ -1,4 +1,3 @@
-import subprocess
 import shutil
 import os
 import sys
@@ -7,6 +6,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import json
 import importlib
+
+from deployml.utils.platform_compat import run_tool
+
 try:
     from importlib.metadata import version as get_package_version_metadata
 except ImportError:
@@ -216,7 +218,7 @@ class DeployMLDoctor:
             return
         
         try:
-            result = subprocess.run(['docker', '--version'], capture_output=True, text=True)
+            result = run_tool('docker', ['--version'], capture_output=True, text=True)
             if result.returncode == 0:
                 version = result.stdout.strip()
                 self._add_result(CheckResult(
@@ -251,7 +253,7 @@ class DeployMLDoctor:
             return
         
         try:
-            result = subprocess.run(['terraform', 'version'], capture_output=True, text=True)
+            result = run_tool('terraform', ['version'], capture_output=True, text=True)
             if result.returncode == 0:
                 version_line = result.stdout.split('\n')[0]
                 self._add_result(CheckResult(
@@ -286,7 +288,7 @@ class DeployMLDoctor:
             if shutil.which(tool):
                 try:
                     if tool == 'gcloud':
-                        result = subprocess.run(['gcloud', 'version'], capture_output=True, text=True)
+                        result = run_tool('gcloud', ['version'], capture_output=True, text=True)
                         if result.returncode == 0:
                             version = result.stdout.split('\n')[0]
                             self._add_result(CheckResult(
@@ -304,7 +306,7 @@ class DeployMLDoctor:
                             ))
                     else:
                         # For AWS and Azure CLI
-                        result = subprocess.run([tool, '--version'], capture_output=True, text=True)
+                        result = run_tool(tool, ['--version'], capture_output=True, text=True)
                         if result.returncode == 0:
                             version = result.stdout.strip()
                             self._add_result(CheckResult(
@@ -342,7 +344,7 @@ class DeployMLDoctor:
             return
         
         try:
-            result = subprocess.run(['git', '--version'], capture_output=True, text=True)
+            result = run_tool('git', ['--version'], capture_output=True, text=True)
             if result.returncode == 0:
                 version = result.stdout.strip()
                 self._add_result(CheckResult(
@@ -372,7 +374,7 @@ class DeployMLDoctor:
             return
         
         try:
-            result = subprocess.run(['infracost', '--version'], capture_output=True, text=True)
+            result = run_tool('infracost', ['--version'], capture_output=True, text=True)
             if result.returncode == 0:
                 version = result.stdout.strip()
                 self._add_result(CheckResult(
@@ -392,7 +394,7 @@ class DeployMLDoctor:
     def _check_docker_permissions(self):
         """Check Docker permissions"""
         try:
-            result = subprocess.run(['docker', 'ps'], capture_output=True, text=True)
+            result = run_tool('docker', ['ps'], capture_output=True, text=True)
             if result.returncode == 0:
                 self._add_result(CheckResult(
                     name="Docker Permissions",
@@ -427,7 +429,7 @@ class DeployMLDoctor:
         # Check GCP authentication
         if shutil.which('gcloud'):
             try:
-                result = subprocess.run(['gcloud', 'auth', 'list'], capture_output=True, text=True)
+                result = run_tool('gcloud', ['auth', 'list'], capture_output=True, text=True)
                 if result.returncode == 0 and "ACTIVE" in result.stdout:
                     self._add_result(CheckResult(
                         name="GCP Authentication",

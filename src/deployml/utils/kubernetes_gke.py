@@ -12,6 +12,7 @@ except Exception:
 
 from deployml.utils.constants import TEMPLATE_DIR
 from deployml.utils.kubernetes_local import ensure_namespace, ns_args
+from deployml.utils.platform_compat import run_tool
 
 
 def check_gke_cluster_connection(cluster_name: str, zone: Optional[str] = None, region: Optional[str] = None) -> bool:
@@ -22,14 +23,14 @@ def check_gke_cluster_connection(cluster_name: str, zone: Optional[str] = None, 
     only return True if the current context contains the exact cluster name.
     """
     try:
-        result = subprocess.run(
-            ["kubectl", "cluster-info"],
+        result = run_tool(
+            "kubectl", ["cluster-info"],
             capture_output=True,
             text=True
         )
         if result.returncode == 0:
-            context_result = subprocess.run(
-                ["kubectl", "config", "current-context"],
+            context_result = run_tool(
+                "kubectl", ["config", "current-context"],
                 capture_output=True,
                 text=True
             )
@@ -67,8 +68,8 @@ def connect_to_gke_cluster(
             typer.echo("Either zone or region must be provided")
             return False
         
-        result = subprocess.run(
-            cmd,
+        result = run_tool(
+            cmd[0], cmd[1:],
             check=True,
             capture_output=True,
             text=True
@@ -89,16 +90,16 @@ def push_image_to_gcr(image_name: str, gcr_image: str, project_id: str) -> bool:
     
     try:
         # Tag image
-        tag_result = subprocess.run(
-            ["docker", "tag", image_name, gcr_image],
+        tag_result = run_tool(
+            "docker", ["tag", image_name, gcr_image],
             check=True,
             capture_output=True,
             text=True
         )
-        
+
         # Push image
-        push_result = subprocess.run(
-            ["docker", "push", gcr_image],
+        push_result = run_tool(
+            "docker", ["push", gcr_image],
             check=True,
             capture_output=True,
             text=True
@@ -366,8 +367,8 @@ def deploy_to_gke(
         pvc_file = manifest_dir / "pvc.yaml"
         if pvc_file.exists():
             typer.echo(f"   Applying {pvc_file.name}...")
-            result = subprocess.run(
-                ["kubectl", "apply", "-f", str(pvc_file)] + ns,
+            result = run_tool(
+                "kubectl", ["apply", "-f", str(pvc_file)] + ns,
                 check=True,
                 capture_output=True,
                 text=True
@@ -375,8 +376,8 @@ def deploy_to_gke(
             typer.echo(f"   {result.stdout.strip()}")
 
         typer.echo(f"   Applying {deployment_file.name}...")
-        result = subprocess.run(
-            ["kubectl", "apply", "-f", str(deployment_file)] + ns,
+        result = run_tool(
+            "kubectl", ["apply", "-f", str(deployment_file)] + ns,
             check=True,
             capture_output=True,
             text=True
@@ -384,8 +385,8 @@ def deploy_to_gke(
         typer.echo(f"   {result.stdout.strip()}")
 
         typer.echo(f"   Applying {service_file.name}...")
-        result = subprocess.run(
-            ["kubectl", "apply", "-f", str(service_file)] + ns,
+        result = run_tool(
+            "kubectl", ["apply", "-f", str(service_file)] + ns,
             check=True,
             capture_output=True,
             text=True
@@ -420,14 +421,14 @@ def deploy_to_gke(
             ip_query = "{.status.loadBalancer.ingress[0].ip}"
             cmd = ["kubectl", "get", "svc", service_name,
                    "-o", f"jsonpath={ip_query}"] + ns
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = run_tool(cmd[0], cmd[1:], capture_output=True, text=True)
 
             external_ip = result.stdout.strip().strip("'")
             if result.returncode == 0 and external_ip and external_ip != "<none>":
                 port_query = "{.spec.ports[0].port}"
                 port_cmd = ["kubectl", "get", "svc", service_name,
                             "-o", f"jsonpath={port_query}"] + ns
-                port_result = subprocess.run(port_cmd, capture_output=True, text=True)
+                port_result = run_tool(port_cmd[0], port_cmd[1:], capture_output=True, text=True)
                 port = port_result.stdout.strip().strip("'") or "5000"
                 typer.echo(f"\n Service is available at: http://{external_ip}:{port}")
                 break
@@ -438,8 +439,8 @@ def deploy_to_gke(
                 typer.echo(f"   Still waiting... ({waited}s)")
         
         typer.echo("\n Deployment status:")
-        subprocess.run(["kubectl", "get", "pods"] + ns)
-        subprocess.run(["kubectl", "get", "svc"] + ns)
+        run_tool("kubectl", ["get", "pods"] + ns)
+        run_tool("kubectl", ["get", "svc"] + ns)
 
         return True
         
