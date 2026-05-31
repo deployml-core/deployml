@@ -5,7 +5,11 @@ import pytest
 import typer
 
 import deployml.utils.helpers as helpers_mod
-from deployml.cli.cli import _load_config_or_exit, _validate_deploy_config_or_exit
+from deployml.cli.cli import (
+    _load_config_or_exit,
+    _validate_deploy_config_or_exit,
+    _gcp_credentials_preflight_or_exit,
+)
 from deployml.utils.helpers import (
     check_gcp_adc,
     check_bq,
@@ -103,6 +107,30 @@ def test_validate_deploy_missing_deployment_type_exits():
     cfg = {"provider": {"name": "gcp", "project_id": "x"}, "deployment": {}}
     with pytest.raises(typer.Exit):
         _validate_deploy_config_or_exit(cfg)
+
+
+# ---------- _gcp_credentials_preflight_or_exit (#54) ----------
+
+@patch("deployml.cli.cli.check_gcp_adc", return_value=True)
+@patch("deployml.cli.cli.check_gcp_auth", return_value=True)
+def test_gcp_preflight_passes_with_auth_and_adc(mock_auth, mock_adc):
+    # Both present: no exit.
+    _gcp_credentials_preflight_or_exit()
+
+
+@patch("deployml.cli.cli.check_gcp_adc", return_value=True)
+@patch("deployml.cli.cli.check_gcp_auth", return_value=False)
+def test_gcp_preflight_exits_when_not_authenticated(mock_auth, mock_adc):
+    with pytest.raises(typer.Exit):
+        _gcp_credentials_preflight_or_exit()
+
+
+@patch("deployml.cli.cli.check_gcp_adc", return_value=False)
+@patch("deployml.cli.cli.check_gcp_auth", return_value=True)
+def test_gcp_preflight_exits_when_adc_missing(mock_auth, mock_adc):
+    # Issue #54: logged in but no ADC must fail at preflight, not at terraform apply.
+    with pytest.raises(typer.Exit):
+        _gcp_credentials_preflight_or_exit()
 
 
 # ---------- check_gcp_adc ----------

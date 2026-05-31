@@ -507,6 +507,25 @@ def _validate_deploy_config_or_exit(config: dict) -> None:
         raise typer.Exit(code=1)
 
 
+def _gcp_credentials_preflight_or_exit() -> None:
+    """Verify gcloud auth and Application Default Credentials before any GCP deploy
+    work. ADC backs the Terraform google provider, so without it deploy fails
+    opaquely at apply with 'default credentials not found' (issue #54)."""
+    if not check_gcp_auth():
+        typer.secho(
+            " gcloud is not authenticated. Run: gcloud auth login",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    if not check_gcp_adc():
+        typer.secho(
+            " Application Default Credentials are missing. "
+            "Run: gcloud auth application-default login",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+
 def get_version():
     """Get version from package metadata"""
     try:
@@ -949,6 +968,13 @@ def deploy(
     if cloud == "gcp" and not validate_gcp_region(region, project_id):
         typer.secho(f" Region '{region}' is not valid for GCP. Run: gcloud compute regions list", fg=typer.colors.RED)
         raise typer.Exit(code=1)
+
+    # ADC backs the Terraform google provider, so deploy must verify auth and ADC
+    # the way init and doctor do. Without this a logged-in user with no ADC passes
+    # the auth check and then fails opaquely at terraform apply (issue #54).
+    if cloud == "gcp":
+        _gcp_credentials_preflight_or_exit()
+
     deployment_type = config["deployment"]["type"]
     stack = config["stack"]
 
@@ -1284,14 +1310,8 @@ def deploy(
     (DEPLOYML_TERRAFORM_DIR / "terraform.tfvars").write_text(tfvars_content)
 
     # Deploy. Falls back to workspace_name when config has no top-level 'name'.
+    # Auth and ADC were already preflighted above, so just point gcloud at the project.
     typer.echo(f" Deploying {config.get('name', workspace_name)} to {cloud}...")
-
-    if not check_gcp_auth():
-        typer.echo(" Authenticating with GCP...")
-        subprocess.run(
-            ["gcloud", "auth", "application-default", "login"],
-            cwd=DEPLOYML_TERRAFORM_DIR,
-        )
 
     subprocess.run(
         ["gcloud", "config", "set", "project", project_id],
