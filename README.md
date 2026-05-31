@@ -78,11 +78,20 @@ See [example/README.md](example/README.md) for details.
 deployml destroy
 ```
 
-Deletes all Cloud Run services, Cloud SQL, GCS bucket, and BigQuery dataset. Does not delete Artifact Registry images or the GCP project.
+Deletes all Cloud Run services, Cloud SQL, the GCS bucket, and the BigQuery dataset, and also removes the Artifact Registry repo and the Cloud Build staging bucket that `build-images` created, so a destroyed project leaves no billing residue. Does not delete the GCP project itself.
 
 ## Full Tutorial
 
 See [docs/tutorials/gcp-cloud-run.md](docs/tutorials/gcp-cloud-run.md) for a step-by-step walkthrough.
+
+## Other deployment targets
+
+Cloud Run is the primary, fully supported path. The CLI also supports Kubernetes for users who want a cluster:
+
+- **Local minikube**, for testing without GCP: `mlflow-init` and `mlflow-deploy`, or `minikube-init` and `minikube-deploy`.
+- **GKE** on GCP: `gke-cluster-create`, `gke-init`, then `gke-deploy` or `gke-apply`, torn down with `gke-destroy`.
+
+MLflow keeps its data on a PersistentVolumeClaim in both, so experiments survive pod restarts. See [CLI Commands](docs/api/cli-commands.md) and the [GKE flow notes](docs/tutorials/gcp-cloud-run.md#gke-flow-notes).
 
 ## Requirements
 
