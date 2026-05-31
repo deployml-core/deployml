@@ -1,7 +1,6 @@
 import sys
 import yaml
 import typer
-import shutil
 import re
 import importlib.resources as pkg_resources
 from deployml.utils.banner import display_banner
@@ -46,7 +45,7 @@ from deployml.utils.helpers import (
     run_terraform_with_loading_bar,
     _create_docker_folder,
 )
-from deployml.utils.platform_compat import run_tool, resolve_tool, configure_console_encoding
+from deployml.utils.platform_compat import run_tool, resolve_tool, configure_console_encoding, robust_rmtree
 from deployml.utils.infracost import (
     check_infracost_available,
     run_infracost_analysis,
@@ -1896,7 +1895,7 @@ def destroy(
 
             if clean_workspace:
                 typer.echo(" Cleaning workspace...")
-                shutil.rmtree(DEPLOYML_DIR)
+                robust_rmtree(DEPLOYML_DIR)
                 typer.echo(" Workspace cleaned")
             elif yes or typer.confirm("Clean up Terraform state files?"):
                 # --yes propagates to the cleanup confirm so scripted runs do not hang
