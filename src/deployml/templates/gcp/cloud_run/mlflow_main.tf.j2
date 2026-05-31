@@ -74,7 +74,10 @@ module "{{ stage_name }}_mlflow" {
   container_concurrency = var.container_concurrency
   artifact_bucket = {% if create_artifact_bucket and tool.params.get("artifact_bucket") %}google_storage_bucket.{{ stage_name }}_mlflow_artifact.name{% else %}var.artifact_bucket{% endif %}
   {% if flags.needs_postgres %}
-  backend_store_uri = module.cloud_sql_postgres.connection_string
+  # DSN comes from Secret Manager so the password is not a plain env var.
+  # Plain backend_store_uri is set to empty so the module picks the secret path.
+  backend_store_uri = ""
+  backend_store_uri_secret_id = module.cloud_sql_postgres.mlflow_dsn_secret_id
   cloudsql_instance_annotation = module.cloud_sql_postgres.instance_connection_name
   {% else %}
   backend_store_uri = "{{ tool.params.get('backend_store_uri', 'sqlite:///mlflow.db') }}"
@@ -128,7 +131,8 @@ module "{{ stage_name }}_{{ tool.name }}" {
   memory_limit        = var.memory_limit
   allow_public_access = var.allow_public_access
   {% if flags.needs_postgres %}
-  backend_store_uri   = module.cloud_sql_postgres.connection_string
+  # Socket DSN. Public IP is blocked; Cloud SQL Auth Proxy via annotation only.
+  backend_store_uri   = module.cloud_sql_postgres.connection_string_cloud_sql
   # IMPORTANT: Provide a dedicated metrics database connection for the app
   # so prediction metrics are not written to the MLflow database.
   db_connection_string = module.cloud_sql_postgres.metrics_connection_string_cloud_sql
@@ -281,7 +285,9 @@ module "{{ stage_name }}_{{ tool.name }}" {
   memory_limit        = var.memory_limit
   allow_public_access = var.allow_public_access
   {% if flags.needs_postgres %}
-  metrics_connection_string = module.cloud_sql_postgres.grafana_connection_string_cloud_sql
+  # DSN comes from Secret Manager. Plain field is empty so the module picks the secret path.
+  metrics_connection_string = ""
+  metrics_connection_string_secret_id = module.cloud_sql_postgres.grafana_metrics_dsn_secret_id
   use_metrics_database = true
   cloudsql_instance_annotation = module.cloud_sql_postgres.instance_connection_name
   depends_on = [module.cloud_sql_postgres]
@@ -323,8 +329,16 @@ output "artifact_bucket" {
 {% endif %}
 {% if flags.needs_postgres %}
 output "postgresql_credentials" {
-  value = module.cloud_sql_postgres.postgresql_credentials
+  value     = module.cloud_sql_postgres.postgresql_credentials
   sensitive = true
+}
+output "mlflow_dsn_secret_id" {
+  description = "Secret Manager ID holding the MLflow DSN."
+  value       = module.cloud_sql_postgres.mlflow_dsn_secret_id
+}
+output "instance_connection_name" {
+  description = "Cloud SQL connection name. Needed to launch the Cloud SQL Auth Proxy locally."
+  value       = module.cloud_sql_postgres.instance_connection_name
 }
 {% endif %}
 output "bigquery_dataset" {
@@ -341,6 +355,10 @@ output "fastapi_url" {
     {% if stage_name == "model_monitoring" and tool.name == "grafana" %}
 output "grafana_url" {
   value = length(module.{{ stage_name }}_{{ tool.name }}) > 0 ? module.{{ stage_name }}_{{ tool.name }}[0].service_url : ""
+}
+output "grafana_admin_password_secret_id" {
+  description = "Secret Manager ID holding the Grafana admin password. Fetch the value with gcloud secrets versions access."
+  value       = length(module.{{ stage_name }}_{{ tool.name }}) > 0 ? module.{{ stage_name }}_{{ tool.name }}[0].admin_password_secret_id : ""
 }
     {% endif %}
     {% if stage_name == "feature_store" and tool.name == "feast" %}
