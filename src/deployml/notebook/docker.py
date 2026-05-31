@@ -2,6 +2,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from deployml.utils.helpers import check_docker_daemon
+
 class ImageBuildError(Exception):
     pass
 
@@ -13,6 +15,7 @@ def build_images(
     tag: str = "latest",
     create_repo: bool = False,
     dry_run: bool = False,
+    platform: Optional[str] = None,
 ) -> None:
     """
     Build all Docker images located in subdirectories of docker_root.
@@ -34,12 +37,24 @@ def build_images(
         tag: Docker image tag.
         create_repo: Whether to create Artifact Registry repository (GCP mode only).
         dry_run: If True, print commands without executing them.
+        platform: Local-mode docker build platform. Default None builds for the
+            host architecture so images run on the local minikube node (arm64 on
+            Apple Silicon). Pass "linux/amd64" only if you are building locally
+            to push to an amd64 target like Cloud Run by hand. The GCP Cloud Build
+            path always produces amd64 regardless of this flag.
     """
 
     docker_root = Path(docker_root)
 
     if not docker_root.exists():
         raise ValueError(f"Docker root does not exist: {docker_root}")
+
+    # Local mode needs docker daemon. GCP mode uses Cloud Build, no local docker needed.
+    if not gcp_project_id and not check_docker_daemon():
+        raise ImageBuildError(
+            "Docker daemon is not running or not reachable. Start Docker Desktop, "
+            "or pass --gcp-project-id to build via Cloud Build."
+        )
 
     # Discover services
     services = [
@@ -79,7 +94,19 @@ def build_images(
                 print()
             else:
                 print("Ensuring Artifact Registry repository exists...")
-                subprocess.run(create_cmd, check=False)  # safe if already exists
+                create_proc = subprocess.run(
+                    create_cmd, check=False,
+                    capture_output=True, text=True,
+                )
+                stderr_lower = (create_proc.stderr or "").lower()
+                if create_proc.returncode == 0:
+                    print(f"Created repository: {repository}")
+                elif "already exists" in stderr_lower or "alreadyexists" in stderr_lower:
+                    print(f"Repository {repository} already exists, reusing.")
+                else:
+                    raise ImageBuildError(
+                        f"Artifact Registry create failed: {create_proc.stderr.strip()}"
+                    )
                 print()
 
         # Build each service
@@ -112,11 +139,15 @@ def build_images(
             service_name = service_dir.name
             image_name = f"{service_name}:{tag}"
 
-            build_cmd = [
-                "docker", "build",
-                "-t", image_name,
-                str(service_dir),
-            ]
+            # Build for the host architecture by default so the image runs on the
+            # local minikube node (arm64 on Apple Silicon). Local mode feeds
+            # minikube; the Cloud Run path builds amd64 via Cloud Build above, so
+            # there is no Cloud Run use case for a forced amd64 local build. Pass
+            # platform explicitly only to override (e.g. a manual amd64 push).
+            build_cmd = ["docker", "build"]
+            if platform:
+                build_cmd += ["--platform", platform]
+            build_cmd += ["-t", image_name, str(service_dir)]
 
             if dry_run:
                 print("Would build locally:")
