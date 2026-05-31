@@ -109,6 +109,58 @@ def test_validate_deploy_missing_deployment_type_exits():
         _validate_deploy_config_or_exit(cfg)
 
 
+# ---------- stack validation (#53) ----------
+
+def test_validate_deploy_valid_stack_ok():
+    cfg = {
+        "provider": {"name": "gcp", "project_id": "x"},
+        "deployment": {"type": "cloud_run"},
+        "stack": [
+            {"experiment_tracking": {"name": "mlflow", "params": {}}},
+            {"model_serving": {"name": "fastapi"}},
+        ],
+    }
+    _validate_deploy_config_or_exit(cfg)
+
+
+def test_validate_deploy_stack_tool_as_set_exits():
+    # Issue #53: a tool value parsed as a set crashed later with
+    # "'set' object has no attribute 'get'". It must exit cleanly here.
+    cfg = {
+        "provider": {"name": "gcp", "project_id": "x"},
+        "deployment": {"type": "cloud_run"},
+        "stack": [{"experiment_tracking": {"mlflow", "params"}}],
+    }
+    with pytest.raises(typer.Exit):
+        _validate_deploy_config_or_exit(cfg)
+
+
+def test_validate_deploy_stack_not_a_list_exits():
+    cfg = {
+        "provider": {"name": "gcp", "project_id": "x"},
+        "deployment": {"type": "cloud_run"},
+        "stack": {"experiment_tracking": {"name": "mlflow"}},
+    }
+    with pytest.raises(typer.Exit):
+        _validate_deploy_config_or_exit(cfg)
+
+
+def test_validate_deploy_stage_not_a_dict_exits():
+    cfg = {
+        "provider": {"name": "gcp", "project_id": "x"},
+        "deployment": {"type": "cloud_run"},
+        "stack": ["experiment_tracking"],
+    }
+    with pytest.raises(typer.Exit):
+        _validate_deploy_config_or_exit(cfg)
+
+
+def test_validate_deploy_no_stack_key_still_ok():
+    # Stack is validated only when present, so configs without it still pass.
+    cfg = {"provider": {"name": "gcp", "project_id": "x"}, "deployment": {"type": "cloud_run"}}
+    _validate_deploy_config_or_exit(cfg)
+
+
 # ---------- _gcp_credentials_preflight_or_exit (#54) ----------
 
 @patch("deployml.cli.cli.check_gcp_adc", return_value=True)

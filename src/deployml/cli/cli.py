@@ -506,6 +506,36 @@ def _validate_deploy_config_or_exit(config: dict) -> None:
         typer.secho(" Config is missing required field: deployment.type.", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
+    # Validate the stack shape so a malformed entry fails here with a clear message
+    # instead of crashing later with "'set' object has no attribute 'get'" when the
+    # deploy loop calls tool.get(...) (issue #53). YAML flow like {a, b} or an
+    # explicit !!set tag parses as a set, not the mapping the stack expects.
+    stack = config.get("stack")
+    if stack is not None:
+        if not isinstance(stack, list):
+            typer.secho(
+                f" config.stack must be a list of stage mappings, got {type(stack).__name__}.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+        for i, stage in enumerate(stack):
+            if not isinstance(stage, dict):
+                typer.secho(
+                    f" config.stack[{i}] must be a mapping of stage name to tool config, "
+                    f"got {type(stage).__name__}.",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(code=1)
+            for stage_name, tool in stage.items():
+                if not isinstance(tool, dict):
+                    typer.secho(
+                        f" config.stack[{i}].{stage_name} must be a mapping with at least a "
+                        f"'name', got {type(tool).__name__}. Check for a stray !!set tag or a "
+                        f"list where a mapping is expected.",
+                        fg=typer.colors.RED,
+                    )
+                    raise typer.Exit(code=1)
+
 
 def _gcp_credentials_preflight_or_exit() -> None:
     """Verify gcloud auth and Application Default Credentials before any GCP deploy
