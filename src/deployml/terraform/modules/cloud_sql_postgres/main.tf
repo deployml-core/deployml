@@ -36,7 +36,15 @@ resource "null_resource" "verify_instance_running" {
   depends_on = [google_sql_database_instance.postgres]
   
   provisioner "local-exec" {
-    command = <<-EOT
+    # Run under bash explicitly. This script uses bash only syntax, set +e, brace
+    # expansion {1..30}, command -v, POSIX test brackets, sleep. On Windows the
+    # default local-exec shell is cmd.exe, which cannot parse any of it, so the
+    # provisioner would fail. bash is provided by Git for Windows or WSL. This is
+    # also a portability win on Ubuntu, where /bin/sh is dash and does not expand
+    # {1..30}. The script self-guards with command -v gcloud and always exits 0, so
+    # it degrades gracefully and never fails the deploy regardless of which bash.
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
       set +e
       echo "Checking Cloud SQL instance status..."
       if ! command -v gcloud &> /dev/null; then
