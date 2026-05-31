@@ -14,6 +14,12 @@ Once deployed, walk through a complete MLOps workflow using a synthetic housing 
 
 **[End-to-End Example →](example.md)**
 
+## Kubernetes: local minikube and GKE
+
+Prefer a Kubernetes cluster over Cloud Run? deployml can run the MLflow and FastAPI stack on a local minikube cluster for offline testing, or on GKE. MLflow keeps its data on a PersistentVolumeClaim so experiments survive pod restarts. The commands are `minikube-init` / `minikube-deploy`, `mlflow-init` / `mlflow-deploy`, and `gke-cluster-create`, `gke-init`, `gke-deploy` / `gke-apply`, `gke-destroy`.
+
+**[GKE flow notes →](gcp-cloud-run.md#gke-flow-notes)** and the [CLI Commands reference](../api/cli-commands.md).
+
 ## Quick Reference
 
 ```bash
