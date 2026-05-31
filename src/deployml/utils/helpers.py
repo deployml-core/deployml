@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import sys
 import importlib.resources as pkg_resources
 from pathlib import Path
 from typing import Optional
@@ -50,6 +51,139 @@ def check_gcp_auth() -> bool:
             ["gcloud", "auth", "list"], capture_output=True, text=True
         )
         return "ACTIVE" in result.stdout
+    except Exception:
+        return False
+
+
+def check_gcp_adc() -> bool:
+    """Application Default Credentials are required by Terraform and client libs."""
+    try:
+        result = subprocess.run(
+            ["gcloud", "auth", "application-default", "print-access-token"],
+            capture_output=True, text=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def check_bq() -> bool:
+    if not shutil.which("bq"):
+        return False
+    try:
+        result = subprocess.run(
+            ["bq", "version"], capture_output=True, text=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def get_terraform_version() -> Optional[tuple]:
+    """Return (major, minor, patch) or None."""
+    if not shutil.which("terraform"):
+        return None
+    try:
+        import json as _json
+        result = subprocess.run(
+            ["terraform", "version", "-json"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return None
+        data = _json.loads(result.stdout)
+        parts = data.get("terraform_version", "").split(".")
+        return tuple(int(p) for p in parts[:3])
+    except Exception:
+        return None
+
+
+def validate_gcp_project(project_id: str) -> bool:
+    """Verify project exists and active gcloud account can access it."""
+    try:
+        result = subprocess.run(
+            ["gcloud", "projects", "describe", project_id,
+             "--format=value(projectId)"],
+            capture_output=True, text=True,
+        )
+        return result.returncode == 0 and result.stdout.strip() == project_id
+    except Exception:
+        return False
+
+
+_GCP_REGIONS_CACHE: Optional[set] = None
+
+
+def validate_gcp_region(region: str, project_id: Optional[str] = None) -> bool:
+    """Check region exists. Cached. Returns True on lookup failure to avoid blocking."""
+    global _GCP_REGIONS_CACHE
+    if _GCP_REGIONS_CACHE is None:
+        cmd = ["gcloud", "compute", "regions", "list", "--format=value(name)"]
+        if project_id:
+            cmd += ["--project", project_id]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(
+                    f"Warning: could not verify region '{region}' "
+                    "(gcloud compute regions list failed). Proceeding unvalidated; "
+                    "a typo here surfaces later as a confusing Terraform error.",
+                    file=sys.stderr,
+                )
+                return True
+            _GCP_REGIONS_CACHE = set(result.stdout.strip().splitlines())
+        except Exception:
+            print(
+                f"Warning: could not verify region '{region}' "
+                "(gcloud unavailable). Proceeding unvalidated.",
+                file=sys.stderr,
+            )
+            return True
+    return region in _GCP_REGIONS_CACHE
+
+
+def get_missing_iam_roles(project_id: str, required_roles: list) -> list:
+    """Return roles the active account lacks. roles/owner short-circuits to empty."""
+    try:
+        import json as _json
+        account_result = subprocess.run(
+            ["gcloud", "config", "get-value", "account"],
+            capture_output=True, text=True,
+        )
+        account = account_result.stdout.strip()
+        if not account:
+            return list(required_roles)
+
+        result = subprocess.run(
+            ["gcloud", "projects", "get-iam-policy", project_id, "--format=json"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return list(required_roles)
+
+        policy = _json.loads(result.stdout)
+        member_keys = {f"user:{account}", f"serviceAccount:{account}"}
+        held = set()
+        for binding in policy.get("bindings", []):
+            if any(m in member_keys for m in binding.get("members", [])):
+                held.add(binding["role"])
+
+        if "roles/owner" in held:
+            return []
+        return [r for r in required_roles if r not in held]
+    except Exception:
+        return list(required_roles)
+
+
+def check_docker_daemon() -> bool:
+    """Returns True if docker daemon is reachable (not just binary present)."""
+    if not shutil.which("docker"):
+        return False
+    try:
+        result = subprocess.run(
+            ["docker", "info"], capture_output=True, text=True,
+        )
+        return result.returncode == 0
     except Exception:
         return False
 
