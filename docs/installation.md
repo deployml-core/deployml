@@ -57,11 +57,45 @@ The doctor checks tool versions, authentication, ADC, the `bq` CLI, enabled APIs
 
 ## Platform notes
 
-deployml is tested on macOS and Linux. Windows users can run it with these caveats:
+deployml runs on macOS, Linux, and native Windows. The CLI commands are identical
+across all three. The engine detects the operating system and adapts underneath, so
+you type the same `deployml` commands everywhere.
 
-- The auth commands above and all `deployml` CLI calls work the same in PowerShell, cmd, and WSL.
-- `export PATH=...` examples in the tutorials are bash. On PowerShell use `$env:PATH = "..." + $env:PATH`. On cmd use `set PATH=...;%PATH%`.
-- Docker Desktop on Windows uses the WSL2 backend by default. `deployml build-images` against Cloud Build does not need a local Docker daemon, so the safest path is to skip local builds and let Cloud Build do the work.
-- If you clone the repo on Windows, the included `.gitattributes` forces shell scripts and Dockerfiles to LF line endings. Without this, `docker build` would fail inside containers with `exec format error`.
+### Windows
+
+deployml works on native Windows in PowerShell or cmd. A few setup notes keep it
+smooth and let it work out of the box:
+
+- Toolchain. Install native Windows builds of Python 3.11 or newer, Git for
+  Windows, the gcloud SDK, Terraform, and Docker Desktop. For the Kubernetes paths
+  also install minikube and run `gcloud components install gke-gcloud-auth-plugin`.
+  `deployml doctor` checks the core tools.
+- Python. Install from python.org, then create the virtual environment with the
+  launcher, `py -3.11 -m venv .venv`. A bare `python` on a fresh Windows often
+  resolves to the Microsoft Store stub, which is not a usable interpreter.
+- Git for Windows is required, not optional. It provides the `bash` that the Cloud
+  SQL readiness step runs under during `deployml deploy`. Confirm `bash --version`
+  resolves before you deploy.
+- Keep the project and its working directory off OneDrive. OneDrive holds file
+  handles open and can make workspace cleanup on `deployml destroy` fail with a
+  PermissionError. A path such as `C:\dev\your-project` avoids this.
+- gcloud, bq, and gsutil ship as `.cmd` wrappers on Windows. deployml resolves and
+  invokes them correctly for you. If you run gcloud yourself in PowerShell and see
+  "running scripts is disabled", call `gcloud.cmd` instead of `gcloud`, or run it
+  from cmd.
+
+### Path syntax across shells
+
+- The `export PATH=...` examples in the tutorials are bash. In PowerShell use
+  `$env:PATH = "...;" + $env:PATH`. In cmd use `set PATH=...;%PATH%`.
+
+### Docker and line endings
+
+- Docker Desktop on Windows uses the WSL2 backend by default. The Cloud Run path
+  builds images with Cloud Build and does not need a local Docker daemon, so for
+  Cloud Run you can skip local builds. Docker is needed only for the minikube path.
+- If you clone the repo on Windows, the included `.gitattributes` forces shell
+  scripts and Dockerfiles to LF line endings. Without this, `docker build` would
+  fail inside containers with `exec format error`.
 
 - [Get Started →](tutorials/overview.md)
