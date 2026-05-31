@@ -1,3 +1,5 @@
+import os
+import shutil
 import subprocess
 import typer
 from pathlib import Path
@@ -40,6 +42,27 @@ def check_gke_cluster_connection(cluster_name: str, zone: Optional[str] = None, 
         return False
 
 
+def warn_if_gke_auth_plugin_missing() -> None:
+    """kubectl needs gke-gcloud-auth-plugin to authenticate to GKE. The gcloud SDK
+    installs it into the SDK bin directory, which is not always on the PATH that a
+    subprocess inherits, especially on Windows. Warn with an actionable hint up
+    front instead of letting kubectl fail later with a cryptic
+    "executable gke-gcloud-auth-plugin not found"."""
+    if shutil.which("gke-gcloud-auth-plugin"):
+        return
+    typer.echo(
+        "WARNING: gke-gcloud-auth-plugin was not found on PATH. kubectl cannot "
+        "authenticate to GKE without it."
+    )
+    typer.echo("   Install it: gcloud components install gke-gcloud-auth-plugin")
+    if os.name == "nt":
+        typer.echo(
+            "   Then add the gcloud SDK bin directory to PATH, typically "
+            "%LOCALAPPDATA%\\Google\\Cloud SDK\\google-cloud-sdk\\bin or "
+            "C:\\Program Files (x86)\\Google\\Cloud SDK\\google-cloud-sdk\\bin."
+        )
+
+
 def connect_to_gke_cluster(
     project_id: str,
     cluster_name: str,
@@ -75,6 +98,8 @@ def connect_to_gke_cluster(
             text=True
         )
         typer.echo(f"Connected to cluster: {cluster_name}")
+        # kubectl will now need the GKE auth plugin; warn early if it is missing.
+        warn_if_gke_auth_plugin_missing()
         return True
     except subprocess.CalledProcessError as e:
         typer.echo(f"Failed to connect to cluster: {e.stderr}")
