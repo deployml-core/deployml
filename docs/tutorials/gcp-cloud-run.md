@@ -261,12 +261,12 @@ set PATH=C:\Users\%USERNAME%\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin
 
 Adjust the path if your gcloud install is elsewhere.
 
-**3. You manage the cluster yourself.**
+**3. Cluster lifecycle and persistence.**
 
-`deployml` does not create or delete GKE clusters for you. Use `gcloud container clusters create-auto` for Autopilot or `gcloud container clusters create` for standard. To tear down:
+Create a cluster with `deployml gke-cluster-create --cluster NAME --project YOUR_GCP_PROJECT_ID --region us-west1`, which uses Autopilot by default, or `--standard` for a small zonal cluster. You can also use `gcloud container clusters create-auto` directly. MLflow on GKE provisions a PersistentVolumeClaim by default, so experiment data survives pod restarts. MLflow and FastAPI must share a namespace for in-cluster service DNS to resolve, so pass the same `--namespace` to both deploys if you do not use the default namespace. To tear down:
 
 ```bash
 deployml gke-destroy --manifest-dir manifests --cluster gke-test --project YOUR_GCP_PROJECT_ID --region us-west1 --delete-cluster
 ```
 
-`--delete-cluster` also removes the cluster. Omit it to only delete the deployed manifests.
+`gke-destroy` deletes the manifests, the MLflow PVC so its PersistentDisk is reclaimed, and the referenced gcr.io image so nothing keeps billing. `--delete-cluster` also removes the cluster. `--keep-images` retains the image for a quick redeploy. Pass `--namespace` if you deployed into a non-default namespace.
