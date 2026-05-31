@@ -82,6 +82,61 @@ def run_tool(name: str, args: list, **kwargs) -> subprocess.CompletedProcess:
         raise
 
 
+def find_windows_bash() -> "str | None":
+    """Absolute path to a real Windows bash (Git for Windows), or None.
+
+    On Windows the bash found first on PATH is often C:\\Windows\\System32\\bash.exe,
+    the WSL launcher. When a Windows process such as terraform.exe invokes it, the
+    WSL launcher re-translates the command line and strips embedded quoting, which
+    breaks Terraform local-exec scripts, for example gcloud --format="value(state)"
+    becomes an unquoted value(state) and bash errors on the parenthesis. Git for
+    Windows ships a normal bash that receives arguments unchanged, so prefer it.
+    Returns None off Windows or if no Git bash is found.
+    """
+    if not IS_WINDOWS:
+        return None
+    candidates = []
+    try:
+        # resolve_tool rejects the extensionless System32\git stub and returns the
+        # real git.exe, for example C:\Program Files\Git\cmd\git.exe.
+        git = resolve_tool("git")
+        git_root = os.path.dirname(os.path.dirname(git))  # ...\Git\cmd -> ...\Git
+        candidates.append(os.path.join(git_root, "bin", "bash.exe"))
+        candidates.append(os.path.join(git_root, "usr", "bin", "bash.exe"))
+    except FileNotFoundError:
+        pass
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    for base in (program_files, program_files_x86):
+        candidates.append(os.path.join(base, "Git", "bin", "bash.exe"))
+    if local_appdata:
+        candidates.append(os.path.join(local_appdata, "Programs", "Git", "bin", "bash.exe"))
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
+def terraform_env() -> "dict | None":
+    """Environment for running terraform so its local-exec provisioners resolve a
+    real Windows bash instead of the WSL launcher.
+
+    Returns None to mean "inherit the current environment unchanged", off Windows
+    or when no Git bash is found. On Windows with Git bash present, returns a copy
+    of the environment with the Git bash directory prepended to PATH, so terraform's
+    bare "bash" interpreter resolves there first, ahead of the WSL launcher in
+    System32.
+    """
+    bash = find_windows_bash()
+    if not bash:
+        return None
+    env = dict(os.environ)
+    bash_dir = os.path.dirname(bash)
+    env["PATH"] = bash_dir + os.pathsep + env.get("PATH", "")
+    return env
+
+
 def configure_console_encoding() -> None:
     """Force UTF-8 on Windows stdout and stderr so non ASCII output never crashes.
 

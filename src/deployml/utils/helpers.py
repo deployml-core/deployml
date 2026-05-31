@@ -8,7 +8,7 @@ from google.cloud import storage
 import random
 import string
 from deployml.utils.constants import ANIMAL_NAMES, FALLBACK_WORDS, TERRAFORM_DIR
-from deployml.utils.platform_compat import run_tool, resolve_tool
+from deployml.utils.platform_compat import run_tool, resolve_tool, terraform_env
 import subprocess
 import time
 from rich.progress import (
@@ -473,6 +473,12 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
     # resolving keeps this robust if the front tool ever changes.
     cmd = [resolve_tool(cmd[0]), *cmd[1:]]
 
+    # On Windows, ensure terraform's local-exec bash interpreter resolves to Git
+    # bash, not the WSL launcher in System32 which mangles quoting and breaks the
+    # Cloud SQL readiness provisioner. None off Windows, so behavior is unchanged
+    # on macOS and Linux.
+    tf_env = terraform_env()
+
     # Default messages if stack is not provided
     default_msgs = [
         "DeployML: Preparing your cloud environment...",
@@ -501,7 +507,8 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
     if verbose:
         with open(log_file, "w") as f:
             process = subprocess.Popen(
-                cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env=tf_env,
             )
             for line in iter(process.stdout.readline, ""):
                 print(line, end="", flush=True)
@@ -522,7 +529,7 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
         f = open(log_file, "w")
         try:
             process = subprocess.Popen(
-                cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT
+                cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, env=tf_env
             )
             start_time = time.time()
             estimated_seconds = estimated_minutes * 60
