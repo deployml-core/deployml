@@ -83,6 +83,17 @@ smooth and let it work out of the box:
   invokes them correctly for you. If you run gcloud yourself in PowerShell and see
   "running scripts is disabled", call `gcloud.cmd` instead of `gcloud`, or run it
   from cmd.
+- minikube on Windows uses the Docker Desktop driver. The service URL deployml
+  prints sits on minikube's internal network and is not reachable from the Windows
+  host directly. Reach it with `minikube tunnel`, `minikube service <name> --url`,
+  or `kubectl port-forward svc/<name> <local>:<port>`. MLflow on minikube wants at
+  least 4 GB, so start with `minikube start --memory=4096 --cpus=2` on a machine
+  that can spare it; an 8 GB machine that is also running Docker Desktop and other
+  apps may not have room for the MLflow pod.
+- Installing a gcloud component such as the GKE auth plugin with
+  `gcloud components install` may, in a non interactive shell, ask you to set
+  `CLOUDSDK_PYTHON` first; run `gcloud components copy-bundled-python` and set the
+  printed path, or just run the install from an interactive prompt.
 
 ### Path syntax across shells
 
