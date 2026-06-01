@@ -5,8 +5,6 @@ import shutil
 import subprocess
 import re
 import importlib.resources as pkg_resources
-from deployml.utils.banner import display_banner
-from deployml.utils.menu import prompt, show_menu
 from deployml.utils.constants import (
     TEMPLATE_DIR,
     TERRAFORM_DIR,
@@ -15,7 +13,6 @@ from deployml.utils.constants import (
     FALLBACK_WORDS,
     REQUIRED_GCP_APIS,
 )
-from deployml.enum.cloud_provider import CloudProvider
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 from typing import Optional
@@ -623,122 +620,6 @@ def vm():
     """
     pass
 
-
-@cli.command()
-def generate():
-    """
-    Generate a deployment configuration YAML file interactively.
-    """
-    display_banner("Welcome to DeployML Stack Generator!")
-    typer.echo("\n")
-    name = prompt("MLOps Stack name", "stack")
-    provider = show_menu("  Select Provider", [CloudProvider.GCP], CloudProvider.GCP)
-
-    # Import DeploymentType here to avoid circular imports
-    from deployml.enum.deployment_type import DeploymentType
-
-    deployment_type = show_menu(
-        " Select Deployment Type", DeploymentType, DeploymentType.CLOUD_RUN
-    )
-
-    # Get provider-specific details
-    if provider == "gcp":
-        project_id = prompt("GCP Project ID", "your-project-id")
-        region = prompt("GCP Region", "us-west1")
-        zone = (
-            prompt("GCP Zone", f"{region}-a")
-            if deployment_type == "cloud_vm"
-            else ""
-        )
-
-    # Generate YAML configuration
-    config = {
-        "name": name,
-        "provider": {
-            "name": provider,
-            "project_id": project_id if provider == "gcp" else "",
-            "region": region if provider == "gcp" else "",
-        },
-    }
-
-    # Add zone for VM deployments
-    if deployment_type == "cloud_vm" and provider == "gcp":
-        config["provider"]["zone"] = zone
-
-    config["deployment"] = {"type": deployment_type}
-
-    # Add default stack configuration
-    config["stack"] = [
-        {
-            "experiment_tracking": {
-                "name": "mlflow",
-                "params": {
-                    "service_name": f"{name}-mlflow-server",
-                    "allow_public_access": True,
-                },
-            }
-        },
-        {
-            "artifact_tracking": {
-                "name": "mlflow",
-                "params": {
-                    "artifact_bucket": (
-                        f"{name}-artifacts-{project_id}"
-                        if provider == "gcp"
-                        else ""
-                    ),
-                    "create_bucket": True,
-                },
-            }
-        },
-        {
-            "model_registry": {
-                "name": "mlflow",
-                "params": {"backend_store_uri": "sqlite:///mlflow.db"},
-            }
-        },
-    ]
-
-    # Add VM-specific parameters for cloud_vm deployment
-    if deployment_type == "cloud_vm":
-        config["stack"][0]["experiment_tracking"]["params"].update(
-            {
-                "vm_name": f"{name}-mlflow-vm",
-                "machine_type": "e2-medium",
-                "disk_size_gb": 20,
-                "mlflow_port": 5000,
-            }
-        )
-
-    # Write configuration to file
-    config_filename = "config.yaml"
-    
-    if not config_filename.exists():
-        typer.secho(
-            "config.yaml not found. Run 'mlops-infra init' first.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(code=1)
-
-    if not force:
-        confirm = typer.confirm(
-            "This will overwrite the existing config.yaml. Continue?"
-        )
-        if not confirm:
-            typer.echo("Aborted.")
-            raise typer.Exit()
-
-    with open(config_filename, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
-    typer.secho(
-        f"\n Configuration saved to: {config_filename}", fg=typer.colors.GREEN
-    )
-    typer.echo(f"\nTo deploy this configuration, run:")
-    typer.secho(
-        f"  deployml deploy --config-path {config_filename}",
-        fg=typer.colors.BRIGHT_BLUE,
-    )
 
 @cli.command()
 def terraform(
