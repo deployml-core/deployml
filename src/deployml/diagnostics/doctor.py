@@ -393,6 +393,17 @@ class DeployMLDoctor:
     
     def _check_docker_permissions(self):
         """Check Docker permissions"""
+        if not shutil.which('docker'):
+            # _check_docker already reports the missing binary. Skip here rather
+            # than emit a misleading "cannot run docker" permission failure.
+            self._add_result(CheckResult(
+                name="Docker Permissions",
+                status=CheckStatus.SKIP,
+                message="Docker not installed, skipping permission check",
+                required=False
+            ))
+            return
+
         try:
             result = run_tool('docker', ['ps'], capture_output=True, text=True)
             if result.returncode == 0:
