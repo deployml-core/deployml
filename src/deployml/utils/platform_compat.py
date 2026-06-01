@@ -69,6 +69,15 @@ def run_tool(name: str, args: list, **kwargs) -> subprocess.CompletedProcess:
     as a direct subprocess.run call would.
     """
     resolved = resolve_tool(name)
+    # On Windows, when the caller captures output as text, subprocess decodes the
+    # child's bytes with the legacy cp1252 code page by default. Tools like minikube
+    # emit bytes that are invalid in cp1252, for example 0x9d, which raises
+    # UnicodeDecodeError. Decode as UTF-8 with replacement instead, the read side
+    # companion to configure_console_encoding. Only when no explicit encoding was
+    # requested, so callers keep full control.
+    if IS_WINDOWS and (kwargs.get("text") or kwargs.get("universal_newlines")):
+        kwargs.setdefault("encoding", "utf-8")
+        kwargs.setdefault("errors", "replace")
     try:
         return subprocess.run([resolved, *args], **kwargs)
     except OSError:

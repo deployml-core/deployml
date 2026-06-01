@@ -505,9 +505,10 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
     log_file = cwd / "terraform_apply.log"
 
     if verbose:
-        with open(log_file, "w") as f:
+        with open(log_file, "w", encoding="utf-8", errors="replace") as f:
             process = subprocess.Popen(
                 cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                encoding="utf-8", errors="replace",
                 env=tf_env,
             )
             for line in iter(process.stdout.readline, ""):
@@ -526,7 +527,7 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
         task = progress.add_task(resource_msgs[0], total=100)
 
         # Open log file and keep it open until process completes
-        f = open(log_file, "w")
+        f = open(log_file, "w", encoding="utf-8", errors="replace")
         try:
             process = subprocess.Popen(
                 cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, env=tf_env
