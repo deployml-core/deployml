@@ -2709,10 +2709,31 @@ def gke_destroy(
         typer.echo("Either --zone or --region must be provided")
         raise typer.Exit(code=1)
 
-    from deployml.utils.kubernetes_gke import connect_to_gke_cluster
+    from deployml.utils.kubernetes_gke import (
+        connect_to_gke_cluster,
+        get_pvc_volume_handle,
+        disk_ref_from_volume_handle,
+        delete_gce_disk_if_exists,
+    )
 
     if not connect_to_gke_cluster(project, cluster, zone, region):
         raise typer.Exit(code=1)
+
+    # Capture the PVC's backing PersistentDisk BEFORE teardown. With
+    # --delete-cluster the in-cluster CSI driver can be removed before it finishes
+    # reclaiming the PD asynchronously, which orphans a billing disk (concern C12).
+    # We capture only the disk our own PVC created, then guarantee its removal
+    # after the cluster is gone.
+    pvc_disk_ref = None
+    if delete_cluster:
+        pvc_manifest = manifest_dir / "pvc.yaml"
+        if pvc_manifest.exists():
+            try:
+                pvc_name = yaml.safe_load(pvc_manifest.read_text())["metadata"]["name"]
+                handle = get_pvc_volume_handle(pvc_name, namespace)
+                pvc_disk_ref = disk_ref_from_volume_handle(handle) if handle else None
+            except Exception:
+                pvc_disk_ref = None
 
     # Delete in reverse order: service, then deployment, then PVC last. The PVC
     # is deleted explicitly because its backing PersistentDisk bills even after
@@ -2768,6 +2789,11 @@ def gke_destroy(
             result = run_tool(cmd[0], cmd[1:], capture_output=True, text=True)
             if result.returncode == 0:
                 typer.echo(f" Cluster {cluster} deleted")
+                # The cluster is gone, so the CSI driver can no longer reclaim the
+                # PVC's PersistentDisk. Guarantee that one disk is removed. No-op
+                # if the driver already reclaimed it before the cluster delete.
+                if pvc_disk_ref:
+                    delete_gce_disk_if_exists(project, pvc_disk_ref)
                 break
             if "incompatible operation" in (result.stderr or "").lower():
                 typer.echo("   Cluster busy with another operation, retrying in 20s...")

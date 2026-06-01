@@ -63,6 +63,88 @@ def warn_if_gke_auth_plugin_missing() -> None:
         )
 
 
+def disk_ref_from_volume_handle(volume_handle):
+    """Parse a GCE PD CSI volume handle into (disk_name, location_flag, location).
+
+    Handles zonal "projects/P/zones/Z/disks/NAME" and regional
+    "projects/P/regions/R/disks/NAME" forms. Returns None when the string is not a
+    GCE PD handle, so callers can skip cleanup safely.
+    """
+    if not volume_handle:
+        return None
+    parts = volume_handle.strip().strip("/").split("/")
+    if "disks" not in parts:
+        return None
+    di = parts.index("disks")
+    if di + 1 >= len(parts):
+        return None
+    disk_name = parts[di + 1]
+    if "zones" in parts:
+        return (disk_name, "--zone", parts[parts.index("zones") + 1])
+    if "regions" in parts:
+        return (disk_name, "--region", parts[parts.index("regions") + 1])
+    return None
+
+
+def get_pvc_volume_handle(pvc_name, namespace=None):
+    """Return the CSI volume handle of the PV bound to pvc_name, or None.
+
+    Must be called while the PVC still exists, since it follows the PVC to its
+    bound PV and reads the PV's CSI volume handle. Used by gke-destroy to capture
+    the backing PersistentDisk before teardown.
+    """
+    ns = ["-n", namespace] if namespace and namespace != "default" else []
+    pv = run_tool(
+        "kubectl",
+        ["get", "pvc", pvc_name, "-o", "jsonpath={.spec.volumeName}"] + ns,
+        capture_output=True, text=True,
+    )
+    pv_name = (pv.stdout or "").strip()
+    if pv.returncode != 0 or not pv_name:
+        return None
+    handle = run_tool(
+        "kubectl",
+        ["get", "pv", pv_name, "-o", "jsonpath={.spec.csi.volumeHandle}"],
+        capture_output=True, text=True,
+    )
+    vh = (handle.stdout or "").strip()
+    return vh or None
+
+
+def delete_gce_disk_if_exists(project, disk_ref) -> bool:
+    """Best-effort delete of a specific GCE PersistentDisk.
+
+    disk_ref is (disk_name, location_flag, location) as returned by
+    disk_ref_from_volume_handle. If the disk is already gone, for example the CSI
+    driver reclaimed it before the cluster was deleted, describe fails and no
+    delete is issued. Only ever touches the one disk passed in, so it cannot
+    affect unrelated disks. Returns True if the disk is absent afterward.
+    """
+    disk_name, loc_flag, loc = disk_ref
+    describe = run_tool(
+        "gcloud",
+        ["compute", "disks", "describe", disk_name, loc_flag, loc,
+         "--project", project, "--format=value(name)"],
+        capture_output=True, text=True,
+    )
+    if describe.returncode != 0:
+        return True
+    typer.echo(f" Removing orphaned persistent disk {disk_name}...")
+    run_tool(
+        "gcloud",
+        ["compute", "disks", "delete", disk_name, loc_flag, loc,
+         "--project", project, "--quiet"],
+        capture_output=True, text=True,
+    )
+    verify = run_tool(
+        "gcloud",
+        ["compute", "disks", "describe", disk_name, loc_flag, loc,
+         "--project", project, "--format=value(name)"],
+        capture_output=True, text=True,
+    )
+    return verify.returncode != 0
+
+
 def connect_to_gke_cluster(
     project_id: str,
     cluster_name: str,
