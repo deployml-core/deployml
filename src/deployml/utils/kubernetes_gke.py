@@ -247,8 +247,13 @@ def generate_fastapi_manifests_gke(
     # avoid the :latest drift bug that bites the Cloud Run path the same way.
     if not image.startswith("gcr.io/"):
         gcr_image = f"gcr.io/{project_id}/fastapi/fastapi:v{_DEPLOYML_VERSION}"
-        if push_image:
-            push_image_to_gcr(image, gcr_image, project_id)
+        if push_image and not push_image_to_gcr(image, gcr_image, project_id):
+            typer.echo(
+                f"WARNING: could not push the image to {gcr_image}. The manifest "
+                f"references that image, so the GKE deploy will fail with "
+                f"ImagePullBackOff until it exists. Start Docker and retry, or push "
+                f"the image to {gcr_image} yourself, then deploy."
+            )
         image = gcr_image
     else:
         gcr_image = image
@@ -344,8 +349,13 @@ def generate_mlflow_manifests_gke(
     # Convert local image to GCR format. Pin tag to the deployml version.
     if not image.startswith("gcr.io/"):
         gcr_image = f"gcr.io/{project_id}/mlflow/mlflow:v{_DEPLOYML_VERSION}"
-        if push_image:
-            push_image_to_gcr(image, gcr_image, project_id)
+        if push_image and not push_image_to_gcr(image, gcr_image, project_id):
+            typer.echo(
+                f"WARNING: could not push the image to {gcr_image}. The manifest "
+                f"references that image, so the GKE deploy will fail with "
+                f"ImagePullBackOff until it exists. Start Docker and retry, or push "
+                f"the image to {gcr_image} yourself, then deploy."
+            )
         image = gcr_image
     else:
         gcr_image = image
