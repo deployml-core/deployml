@@ -187,19 +187,19 @@ def test_gcp_preflight_exits_when_adc_missing(mock_auth, mock_adc):
 
 # ---------- check_gcp_adc ----------
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_check_gcp_adc_returncode_zero_true(mock_run):
     mock_run.return_value = MagicMock(returncode=0)
     assert check_gcp_adc() is True
 
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_check_gcp_adc_returncode_nonzero_false(mock_run):
     mock_run.return_value = MagicMock(returncode=1)
     assert check_gcp_adc() is False
 
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_check_gcp_adc_exception_returns_false(mock_run):
     mock_run.side_effect = OSError("boom")
     assert check_gcp_adc() is False
@@ -214,7 +214,7 @@ def test_check_bq_binary_missing_false(mock_which):
 
 
 @patch("deployml.utils.helpers.shutil.which")
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_check_bq_binary_present_and_runs(mock_run, mock_which):
     mock_which.return_value = "/usr/bin/bq"
     mock_run.return_value = MagicMock(returncode=0)
@@ -222,7 +222,7 @@ def test_check_bq_binary_present_and_runs(mock_run, mock_which):
 
 
 @patch("deployml.utils.helpers.shutil.which")
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_check_bq_binary_present_but_errors(mock_run, mock_which):
     mock_which.return_value = "/usr/bin/bq"
     mock_run.return_value = MagicMock(returncode=2)
@@ -238,7 +238,7 @@ def test_get_terraform_version_binary_missing(mock_which):
 
 
 @patch("deployml.utils.helpers.shutil.which")
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_get_terraform_version_parses_json(mock_run, mock_which):
     mock_which.return_value = "/usr/bin/terraform"
     mock_run.return_value = MagicMock(
@@ -249,7 +249,7 @@ def test_get_terraform_version_parses_json(mock_run, mock_which):
 
 
 @patch("deployml.utils.helpers.shutil.which")
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_get_terraform_version_bad_json_returns_none(mock_run, mock_which):
     mock_which.return_value = "/usr/bin/terraform"
     mock_run.return_value = MagicMock(returncode=0, stdout="not json")
@@ -258,19 +258,19 @@ def test_get_terraform_version_bad_json_returns_none(mock_run, mock_which):
 
 # ---------- validate_gcp_project ----------
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_validate_gcp_project_exists(mock_run):
     mock_run.return_value = MagicMock(returncode=0, stdout="my-project\n")
     assert validate_gcp_project("my-project") is True
 
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_validate_gcp_project_missing(mock_run):
     mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
     assert validate_gcp_project("ghost") is False
 
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_validate_gcp_project_stdout_mismatch(mock_run):
     # returncode 0 but stdout does not match the project id we asked for
     mock_run.return_value = MagicMock(returncode=0, stdout="other-project\n")
@@ -279,7 +279,7 @@ def test_validate_gcp_project_stdout_mismatch(mock_run):
 
 # ---------- validate_gcp_region ----------
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_validate_gcp_region_in_list(mock_run):
     helpers_mod._GCP_REGIONS_CACHE = None
     mock_run.return_value = MagicMock(
@@ -289,7 +289,7 @@ def test_validate_gcp_region_in_list(mock_run):
     assert validate_gcp_region("us-west1") is True
 
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_validate_gcp_region_not_in_list(mock_run):
     helpers_mod._GCP_REGIONS_CACHE = None
     mock_run.return_value = MagicMock(
@@ -299,7 +299,7 @@ def test_validate_gcp_region_not_in_list(mock_run):
     assert validate_gcp_region("mars-central1") is False
 
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_validate_gcp_region_lookup_failure_does_not_block(mock_run):
     helpers_mod._GCP_REGIONS_CACHE = None
     mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="oops")
@@ -315,7 +315,7 @@ def test_check_docker_daemon_binary_missing(mock_which):
 
 
 @patch("deployml.utils.helpers.shutil.which")
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_check_docker_daemon_up(mock_run, mock_which):
     mock_which.return_value = "/usr/local/bin/docker"
     mock_run.return_value = MagicMock(returncode=0)
@@ -323,7 +323,7 @@ def test_check_docker_daemon_up(mock_run, mock_which):
 
 
 @patch("deployml.utils.helpers.shutil.which")
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_check_docker_daemon_down(mock_run, mock_which):
     mock_which.return_value = "/usr/local/bin/docker"
     mock_run.return_value = MagicMock(returncode=1, stderr="cannot connect")
@@ -332,7 +332,7 @@ def test_check_docker_daemon_down(mock_run, mock_which):
 
 # ---------- get_missing_iam_roles ----------
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_get_missing_iam_roles_owner_short_circuits(mock_run):
     mock_run.side_effect = [
         MagicMock(returncode=0, stdout="me@example.com\n"),
@@ -345,7 +345,7 @@ def test_get_missing_iam_roles_owner_short_circuits(mock_run):
     assert get_missing_iam_roles("proj", required) == []
 
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_get_missing_iam_roles_some_missing(mock_run):
     mock_run.side_effect = [
         MagicMock(returncode=0, stdout="me@example.com\n"),
@@ -358,13 +358,13 @@ def test_get_missing_iam_roles_some_missing(mock_run):
     assert get_missing_iam_roles("proj", required) == ["roles/run.admin"]
 
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_get_missing_iam_roles_account_lookup_fails_returns_all(mock_run):
     mock_run.return_value = MagicMock(returncode=0, stdout="")
     assert get_missing_iam_roles("proj", ["roles/run.admin"]) == ["roles/run.admin"]
 
 
-@patch("deployml.utils.helpers.subprocess.run")
+@patch("deployml.utils.helpers.run_tool")
 def test_get_missing_iam_roles_policy_query_fails_returns_all(mock_run):
     mock_run.side_effect = [
         MagicMock(returncode=0, stdout="me@example.com\n"),

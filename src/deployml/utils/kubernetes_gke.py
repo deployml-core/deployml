@@ -1,3 +1,5 @@
+import os
+import shutil
 import subprocess
 import typer
 from pathlib import Path
@@ -12,6 +14,7 @@ except Exception:
 
 from deployml.utils.constants import TEMPLATE_DIR
 from deployml.utils.kubernetes_local import ensure_namespace, ns_args
+from deployml.utils.platform_compat import run_tool
 
 
 def check_gke_cluster_connection(cluster_name: str, zone: Optional[str] = None, region: Optional[str] = None) -> bool:
@@ -22,14 +25,14 @@ def check_gke_cluster_connection(cluster_name: str, zone: Optional[str] = None, 
     only return True if the current context contains the exact cluster name.
     """
     try:
-        result = subprocess.run(
-            ["kubectl", "cluster-info"],
+        result = run_tool(
+            "kubectl", ["cluster-info"],
             capture_output=True,
             text=True
         )
         if result.returncode == 0:
-            context_result = subprocess.run(
-                ["kubectl", "config", "current-context"],
+            context_result = run_tool(
+                "kubectl", ["config", "current-context"],
                 capture_output=True,
                 text=True
             )
@@ -37,6 +40,109 @@ def check_gke_cluster_connection(cluster_name: str, zone: Optional[str] = None, 
         return False
     except Exception:
         return False
+
+
+def warn_if_gke_auth_plugin_missing() -> None:
+    """kubectl needs gke-gcloud-auth-plugin to authenticate to GKE. The gcloud SDK
+    installs it into the SDK bin directory, which is not always on the PATH that a
+    subprocess inherits, especially on Windows. Warn with an actionable hint up
+    front instead of letting kubectl fail later with a cryptic
+    "executable gke-gcloud-auth-plugin not found"."""
+    if shutil.which("gke-gcloud-auth-plugin"):
+        return
+    typer.echo(
+        "WARNING: gke-gcloud-auth-plugin was not found on PATH. kubectl cannot "
+        "authenticate to GKE without it."
+    )
+    typer.echo("   Install it: gcloud components install gke-gcloud-auth-plugin")
+    if os.name == "nt":
+        typer.echo(
+            "   Then add the gcloud SDK bin directory to PATH, typically "
+            "%LOCALAPPDATA%\\Google\\Cloud SDK\\google-cloud-sdk\\bin or "
+            "C:\\Program Files (x86)\\Google\\Cloud SDK\\google-cloud-sdk\\bin."
+        )
+
+
+def disk_ref_from_volume_handle(volume_handle):
+    """Parse a GCE PD CSI volume handle into (disk_name, location_flag, location).
+
+    Handles zonal "projects/P/zones/Z/disks/NAME" and regional
+    "projects/P/regions/R/disks/NAME" forms. Returns None when the string is not a
+    GCE PD handle, so callers can skip cleanup safely.
+    """
+    if not volume_handle:
+        return None
+    parts = volume_handle.strip().strip("/").split("/")
+    if "disks" not in parts:
+        return None
+    di = parts.index("disks")
+    if di + 1 >= len(parts):
+        return None
+    disk_name = parts[di + 1]
+    if "zones" in parts:
+        return (disk_name, "--zone", parts[parts.index("zones") + 1])
+    if "regions" in parts:
+        return (disk_name, "--region", parts[parts.index("regions") + 1])
+    return None
+
+
+def get_pvc_volume_handle(pvc_name, namespace=None):
+    """Return the CSI volume handle of the PV bound to pvc_name, or None.
+
+    Must be called while the PVC still exists, since it follows the PVC to its
+    bound PV and reads the PV's CSI volume handle. Used by gke-destroy to capture
+    the backing PersistentDisk before teardown.
+    """
+    ns = ["-n", namespace] if namespace and namespace != "default" else []
+    pv = run_tool(
+        "kubectl",
+        ["get", "pvc", pvc_name, "-o", "jsonpath={.spec.volumeName}"] + ns,
+        capture_output=True, text=True,
+    )
+    pv_name = (pv.stdout or "").strip()
+    if pv.returncode != 0 or not pv_name:
+        return None
+    handle = run_tool(
+        "kubectl",
+        ["get", "pv", pv_name, "-o", "jsonpath={.spec.csi.volumeHandle}"],
+        capture_output=True, text=True,
+    )
+    vh = (handle.stdout or "").strip()
+    return vh or None
+
+
+def delete_gce_disk_if_exists(project, disk_ref) -> bool:
+    """Best-effort delete of a specific GCE PersistentDisk.
+
+    disk_ref is (disk_name, location_flag, location) as returned by
+    disk_ref_from_volume_handle. If the disk is already gone, for example the CSI
+    driver reclaimed it before the cluster was deleted, describe fails and no
+    delete is issued. Only ever touches the one disk passed in, so it cannot
+    affect unrelated disks. Returns True if the disk is absent afterward.
+    """
+    disk_name, loc_flag, loc = disk_ref
+    describe = run_tool(
+        "gcloud",
+        ["compute", "disks", "describe", disk_name, loc_flag, loc,
+         "--project", project, "--format=value(name)"],
+        capture_output=True, text=True,
+    )
+    if describe.returncode != 0:
+        return True
+    typer.echo(f" Removing orphaned persistent disk {disk_name}...")
+    run_tool(
+        "gcloud",
+        ["compute", "disks", "delete", disk_name, loc_flag, loc,
+         "--project", project, "--quiet"],
+        capture_output=True, text=True,
+    )
+    verify = run_tool(
+        "gcloud",
+        ["compute", "disks", "describe", disk_name, loc_flag, loc,
+         "--project", project, "--format=value(name)"],
+        capture_output=True, text=True,
+    )
+    return verify.returncode != 0
 
 
 def connect_to_gke_cluster(
@@ -67,13 +173,15 @@ def connect_to_gke_cluster(
             typer.echo("Either zone or region must be provided")
             return False
         
-        result = subprocess.run(
-            cmd,
+        result = run_tool(
+            cmd[0], cmd[1:],
             check=True,
             capture_output=True,
             text=True
         )
         typer.echo(f"Connected to cluster: {cluster_name}")
+        # kubectl will now need the GKE auth plugin; warn early if it is missing.
+        warn_if_gke_auth_plugin_missing()
         return True
     except subprocess.CalledProcessError as e:
         typer.echo(f"Failed to connect to cluster: {e.stderr}")
@@ -89,16 +197,16 @@ def push_image_to_gcr(image_name: str, gcr_image: str, project_id: str) -> bool:
     
     try:
         # Tag image
-        tag_result = subprocess.run(
-            ["docker", "tag", image_name, gcr_image],
+        tag_result = run_tool(
+            "docker", ["tag", image_name, gcr_image],
             check=True,
             capture_output=True,
             text=True
         )
-        
+
         # Push image
-        push_result = subprocess.run(
-            ["docker", "push", gcr_image],
+        push_result = run_tool(
+            "docker", ["push", gcr_image],
             check=True,
             capture_output=True,
             text=True
@@ -139,8 +247,13 @@ def generate_fastapi_manifests_gke(
     # avoid the :latest drift bug that bites the Cloud Run path the same way.
     if not image.startswith("gcr.io/"):
         gcr_image = f"gcr.io/{project_id}/fastapi/fastapi:v{_DEPLOYML_VERSION}"
-        if push_image:
-            push_image_to_gcr(image, gcr_image, project_id)
+        if push_image and not push_image_to_gcr(image, gcr_image, project_id):
+            typer.echo(
+                f"WARNING: could not push the image to {gcr_image}. The manifest "
+                f"references that image, so the GKE deploy will fail with "
+                f"ImagePullBackOff until it exists. Start Docker and retry, or push "
+                f"the image to {gcr_image} yourself, then deploy."
+            )
         image = gcr_image
     else:
         gcr_image = image
@@ -236,8 +349,13 @@ def generate_mlflow_manifests_gke(
     # Convert local image to GCR format. Pin tag to the deployml version.
     if not image.startswith("gcr.io/"):
         gcr_image = f"gcr.io/{project_id}/mlflow/mlflow:v{_DEPLOYML_VERSION}"
-        if push_image:
-            push_image_to_gcr(image, gcr_image, project_id)
+        if push_image and not push_image_to_gcr(image, gcr_image, project_id):
+            typer.echo(
+                f"WARNING: could not push the image to {gcr_image}. The manifest "
+                f"references that image, so the GKE deploy will fail with "
+                f"ImagePullBackOff until it exists. Start Docker and retry, or push "
+                f"the image to {gcr_image} yourself, then deploy."
+            )
         image = gcr_image
     else:
         gcr_image = image
@@ -366,8 +484,8 @@ def deploy_to_gke(
         pvc_file = manifest_dir / "pvc.yaml"
         if pvc_file.exists():
             typer.echo(f"   Applying {pvc_file.name}...")
-            result = subprocess.run(
-                ["kubectl", "apply", "-f", str(pvc_file)] + ns,
+            result = run_tool(
+                "kubectl", ["apply", "-f", str(pvc_file)] + ns,
                 check=True,
                 capture_output=True,
                 text=True
@@ -375,8 +493,8 @@ def deploy_to_gke(
             typer.echo(f"   {result.stdout.strip()}")
 
         typer.echo(f"   Applying {deployment_file.name}...")
-        result = subprocess.run(
-            ["kubectl", "apply", "-f", str(deployment_file)] + ns,
+        result = run_tool(
+            "kubectl", ["apply", "-f", str(deployment_file)] + ns,
             check=True,
             capture_output=True,
             text=True
@@ -384,8 +502,8 @@ def deploy_to_gke(
         typer.echo(f"   {result.stdout.strip()}")
 
         typer.echo(f"   Applying {service_file.name}...")
-        result = subprocess.run(
-            ["kubectl", "apply", "-f", str(service_file)] + ns,
+        result = run_tool(
+            "kubectl", ["apply", "-f", str(service_file)] + ns,
             check=True,
             capture_output=True,
             text=True
@@ -420,14 +538,14 @@ def deploy_to_gke(
             ip_query = "{.status.loadBalancer.ingress[0].ip}"
             cmd = ["kubectl", "get", "svc", service_name,
                    "-o", f"jsonpath={ip_query}"] + ns
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = run_tool(cmd[0], cmd[1:], capture_output=True, text=True)
 
             external_ip = result.stdout.strip().strip("'")
             if result.returncode == 0 and external_ip and external_ip != "<none>":
                 port_query = "{.spec.ports[0].port}"
                 port_cmd = ["kubectl", "get", "svc", service_name,
                             "-o", f"jsonpath={port_query}"] + ns
-                port_result = subprocess.run(port_cmd, capture_output=True, text=True)
+                port_result = run_tool(port_cmd[0], port_cmd[1:], capture_output=True, text=True)
                 port = port_result.stdout.strip().strip("'") or "5000"
                 typer.echo(f"\n Service is available at: http://{external_ip}:{port}")
                 break
@@ -438,8 +556,8 @@ def deploy_to_gke(
                 typer.echo(f"   Still waiting... ({waited}s)")
         
         typer.echo("\n Deployment status:")
-        subprocess.run(["kubectl", "get", "pods"] + ns)
-        subprocess.run(["kubectl", "get", "svc"] + ns)
+        run_tool("kubectl", ["get", "pods"] + ns)
+        run_tool("kubectl", ["get", "svc"] + ns)
 
         return True
         

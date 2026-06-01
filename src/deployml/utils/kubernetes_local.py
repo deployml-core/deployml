@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, Dict
 from jinja2 import Environment, FileSystemLoader
 from deployml.utils.constants import TEMPLATE_DIR
+from deployml.utils.platform_compat import run_tool
 
 
 def ns_args(namespace: Optional[str]) -> list:
@@ -17,21 +18,21 @@ def ensure_namespace(namespace: Optional[str]) -> None:
     namespace. Idempotent via apply of a client-side dry-run manifest."""
     if not namespace or namespace == "default":
         return
-    rendered = subprocess.run(
-        ["kubectl", "create", "namespace", namespace, "--dry-run=client", "-o", "yaml"],
+    rendered = run_tool(
+        "kubectl", ["create", "namespace", namespace, "--dry-run=client", "-o", "yaml"],
         capture_output=True, text=True,
     )
     if rendered.returncode == 0:
-        subprocess.run(["kubectl", "apply", "-f", "-"], input=rendered.stdout,
-                       capture_output=True, text=True)
+        run_tool("kubectl", ["apply", "-f", "-"], input=rendered.stdout,
+                 capture_output=True, text=True)
         typer.echo(f"   Using namespace: {namespace}")
 
 
 def check_minikube_running() -> bool:
     """Check if minikube is currently running."""
     try:
-        result = subprocess.run(
-            ["minikube", "status"],
+        result = run_tool(
+            "minikube", ["status"],
             capture_output=True,
             text=True
         )
@@ -44,8 +45,8 @@ def start_minikube() -> bool:
     """Start minikube cluster."""
     typer.echo("Starting minikube...")
     try:
-        result = subprocess.run(
-            ["minikube", "start"],
+        result = run_tool(
+            "minikube", ["start"],
             check=True,
             capture_output=True,
             text=True
@@ -264,15 +265,15 @@ def deploy_mlflow_to_minikube(manifest_dir: Path, image_name: Optional[str] = No
         pvc_file = manifest_dir / "pvc.yaml"
         if pvc_file.exists():
             typer.echo(f"   Applying {pvc_file.name}...")
-            result = subprocess.run(
-                ["kubectl", "apply", "-f", str(pvc_file)] + ns,
+            result = run_tool(
+                "kubectl", ["apply", "-f", str(pvc_file)] + ns,
                 check=True, capture_output=True, text=True,
             )
             typer.echo(f"{result.stdout.strip()}")
 
         typer.echo(f"   Applying {deployment_file.name}...")
-        result = subprocess.run(
-            ["kubectl", "apply", "-f", str(deployment_file)] + ns,
+        result = run_tool(
+            "kubectl", ["apply", "-f", str(deployment_file)] + ns,
             check=True,
             capture_output=True,
             text=True
@@ -281,8 +282,8 @@ def deploy_mlflow_to_minikube(manifest_dir: Path, image_name: Optional[str] = No
 
         # Apply service
         typer.echo(f"   Applying {service_file.name}...")
-        result = subprocess.run(
-            ["kubectl", "apply", "-f", str(service_file)] + ns,
+        result = run_tool(
+            "kubectl", ["apply", "-f", str(service_file)] + ns,
             check=True,
             capture_output=True,
             text=True
@@ -294,8 +295,8 @@ def deploy_mlflow_to_minikube(manifest_dir: Path, image_name: Optional[str] = No
 
         # Try minikube service --url with timeout (can hang)
         try:
-            result = subprocess.run(
-                ["minikube", "service", "mlflow-service", "--url"] + ns,
+            result = run_tool(
+                "minikube", ["service", "mlflow-service", "--url"] + ns,
                 capture_output=True,
                 text=True,
                 timeout=5  # 5 second timeout to prevent hanging
@@ -309,15 +310,15 @@ def deploy_mlflow_to_minikube(manifest_dir: Path, image_name: Optional[str] = No
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
             # Fallback: get NodePort manually (more reliable)
             typer.echo("   Getting NodePort...")
-            result = subprocess.run(
-                ["kubectl", "get", "svc", "mlflow-service", "-o", "jsonpath='{.spec.ports[0].nodePort}'"] + ns,
+            result = run_tool(
+                "kubectl", ["get", "svc", "mlflow-service", "-o", "jsonpath='{.spec.ports[0].nodePort}'"] + ns,
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 node_port = result.stdout.strip().strip("'")
-                minikube_ip_result = subprocess.run(
-                    ["minikube", "ip"],
+                minikube_ip_result = run_tool(
+                    "minikube", ["ip"],
                     capture_output=True,
                     text=True
                 )
@@ -330,8 +331,8 @@ def deploy_mlflow_to_minikube(manifest_dir: Path, image_name: Optional[str] = No
                 typer.echo("   Could not determine service URL. Check with: kubectl get svc mlflow-service")
 
         typer.echo("\n Deployment status:")
-        subprocess.run(["kubectl", "get", "pods", "-l", "app=mlflow"] + ns)
-        subprocess.run(["kubectl", "get", "svc", "-l", "app=mlflow"] + ns)
+        run_tool("kubectl", ["get", "pods", "-l", "app=mlflow"] + ns)
+        run_tool("kubectl", ["get", "svc", "-l", "app=mlflow"] + ns)
         
         return True
         
@@ -387,8 +388,8 @@ def deploy_fastapi_to_minikube(manifest_dir: Path, image_name: Optional[str] = N
 
     try:
         typer.echo(f"   Applying {deployment_file.name}...")
-        result = subprocess.run(
-            ["kubectl", "apply", "-f", str(deployment_file)] + ns,
+        result = run_tool(
+            "kubectl", ["apply", "-f", str(deployment_file)] + ns,
             check=True,
             capture_output=True,
             text=True
@@ -397,8 +398,8 @@ def deploy_fastapi_to_minikube(manifest_dir: Path, image_name: Optional[str] = N
 
         # Apply service
         typer.echo(f"   Applying {service_file.name}...")
-        result = subprocess.run(
-            ["kubectl", "apply", "-f", str(service_file)] + ns,
+        result = run_tool(
+            "kubectl", ["apply", "-f", str(service_file)] + ns,
             check=True,
             capture_output=True,
             text=True
@@ -410,8 +411,8 @@ def deploy_fastapi_to_minikube(manifest_dir: Path, image_name: Optional[str] = N
 
         # Try minikube service --url with timeout (can hang)
         try:
-            result = subprocess.run(
-                ["minikube", "service", "fastapi-service", "--url"] + ns,
+            result = run_tool(
+                "minikube", ["service", "fastapi-service", "--url"] + ns,
                 capture_output=True,
                 text=True,
                 timeout=5  # 5 second timeout to prevent hanging
@@ -425,15 +426,15 @@ def deploy_fastapi_to_minikube(manifest_dir: Path, image_name: Optional[str] = N
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
             # Fallback: get NodePort manually (more reliable)
             typer.echo("   Getting NodePort...")
-            result = subprocess.run(
-                ["kubectl", "get", "svc", "fastapi-service", "-o", "jsonpath='{.spec.ports[0].nodePort}'"] + ns,
+            result = run_tool(
+                "kubectl", ["get", "svc", "fastapi-service", "-o", "jsonpath='{.spec.ports[0].nodePort}'"] + ns,
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 node_port = result.stdout.strip().strip("'")
-                minikube_ip_result = subprocess.run(
-                    ["minikube", "ip"],
+                minikube_ip_result = run_tool(
+                    "minikube", ["ip"],
                     capture_output=True,
                     text=True
                 )
@@ -446,8 +447,8 @@ def deploy_fastapi_to_minikube(manifest_dir: Path, image_name: Optional[str] = N
                 typer.echo("   Could not determine service URL. Check with: kubectl get svc fastapi-service")
 
         typer.echo("\n Deployment status:")
-        subprocess.run(["kubectl", "get", "pods", "-l", "app=fastapi"] + ns)
-        subprocess.run(["kubectl", "get", "svc", "-l", "app=fastapi"] + ns)
+        run_tool("kubectl", ["get", "pods", "-l", "app=fastapi"] + ns)
+        run_tool("kubectl", ["get", "svc", "-l", "app=fastapi"] + ns)
         
         return True
         
@@ -470,8 +471,8 @@ def load_image_to_minikube(image_name: str) -> bool:
         True if image was loaded or already exists, False otherwise
     """
     # Check if image exists locally
-    result = subprocess.run(
-        ["docker", "images", "-q", image_name],
+    result = run_tool(
+        "docker", ["images", "-q", image_name],
         capture_output=True,
         text=True
     )
@@ -482,8 +483,8 @@ def load_image_to_minikube(image_name: str) -> bool:
         return False
     
     # Check if image is already in minikube
-    result = subprocess.run(
-        ["minikube", "image", "ls"],
+    result = run_tool(
+        "minikube", ["image", "ls"],
         capture_output=True,
         text=True
     )
@@ -494,8 +495,8 @@ def load_image_to_minikube(image_name: str) -> bool:
     
     # Load image into minikube
     typer.echo(f"📦 Loading image '{image_name}' into minikube...")
-    result = subprocess.run(
-        ["minikube", "image", "load", image_name],
+    result = run_tool(
+        "minikube", ["image", "load", image_name],
         check=True,
         capture_output=True,
         text=True

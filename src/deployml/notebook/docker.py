@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 from deployml.utils.helpers import check_docker_daemon
+from deployml.utils.platform_compat import run_tool
 
 class ImageBuildError(Exception):
     pass
@@ -94,8 +95,8 @@ def build_images(
                 print()
             else:
                 print("Ensuring Artifact Registry repository exists...")
-                create_proc = subprocess.run(
-                    create_cmd, check=False,
+                create_proc = run_tool(
+                    create_cmd[0], create_cmd[1:], check=False,
                     capture_output=True, text=True,
                 )
                 stderr_lower = (create_proc.stderr or "").lower()
@@ -127,7 +128,7 @@ def build_images(
                 print()
             else:
                 print(f"Building {service_name} via Cloud Build...")
-                subprocess.run(build_cmd, check=True)
+                run_tool(build_cmd[0], build_cmd[1:], check=True)
                 print(f"Pushed: {image_uri}")
                 print()
 
@@ -155,7 +156,7 @@ def build_images(
                 print()
             else:
                 print(f"Building {service_name} locally...")
-                subprocess.run(build_cmd, check=True)
+                run_tool(build_cmd[0], build_cmd[1:], check=True)
                 print(f"Built: {image_name}")
                 print()
 
@@ -168,8 +169,8 @@ def build_images(
 
 def _validate_docker():
     try:
-        subprocess.run(
-            ["docker", "--version"],
+        run_tool(
+            "docker", ["--version"],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -187,9 +188,9 @@ def _build_locally(service_dirs: list[Path], tag: str):
 
         print(f"Building {image_name} ...")
 
-        subprocess.run(
+        run_tool(
+            "docker",
             [
-                "docker",
                 "build",
                 "-t",
                 image_name,
@@ -207,8 +208,8 @@ def _build_locally(service_dirs: list[Path], tag: str):
 
 def _validate_gcloud():
     try:
-        subprocess.run(
-            ["gcloud", "--version"],
+        run_tool(
+            "gcloud", ["--version"],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -238,9 +239,9 @@ def _build_with_cloud_build(
 
         print(f"Submitting Cloud Build for {image_uri} ...")
 
-        subprocess.run(
+        run_tool(
+            "gcloud",
             [
-                "gcloud",
                 "builds",
                 "submit",
                 str(service_dir),

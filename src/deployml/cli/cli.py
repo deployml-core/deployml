@@ -1,8 +1,6 @@
 import sys
 import yaml
 import typer
-import shutil
-import subprocess
 import re
 import importlib.resources as pkg_resources
 from deployml.utils.banner import display_banner
@@ -47,6 +45,7 @@ from deployml.utils.helpers import (
     run_terraform_with_loading_bar,
     _create_docker_folder,
 )
+from deployml.utils.platform_compat import run_tool, resolve_tool, configure_console_encoding, robust_rmtree
 from deployml.utils.infracost import (
     check_infracost_available,
     run_infracost_analysis,
@@ -81,8 +80,8 @@ def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspac
     try:
         # Get terraform files bucket from Terraform state
         # The bucket is created by the teardown module
-        state_proc = subprocess.run(
-            ["terraform", "state", "list"],
+        state_proc = run_tool(
+            "terraform", ["state", "list"],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -104,8 +103,8 @@ def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspac
             return
         
         # Get bucket name from state
-        show_proc = subprocess.run(
-            ["terraform", "state", "show", bucket_resource],
+        show_proc = run_tool(
+            "terraform", ["state", "show", bucket_resource],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -160,7 +159,6 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
     Returns a manifest dictionary with all resources that need to be deleted.
     """
     import json
-    import subprocess
     from urllib.parse import urlparse
     
     manifest = {
@@ -181,13 +179,13 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
     }
     
     # Get Terraform outputs
-    output_proc = subprocess.run(
-        ["terraform", "output", "-json"],
+    output_proc = run_tool(
+        "terraform", ["output", "-json"],
         cwd=terraform_dir,
         capture_output=True,
         text=True,
     )
-    
+
     if output_proc.returncode == 0:
         outputs = json.loads(output_proc.stdout)
         
@@ -217,8 +215,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                     })
     
     # Query Terraform state for additional resources
-    state_proc = subprocess.run(
-        ["terraform", "state", "list"],
+    state_proc = run_tool(
+        "terraform", ["state", "list"],
         cwd=terraform_dir,
         capture_output=True,
         text=True,
@@ -231,8 +229,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
             try:
                 # Cloud Run services (v1 and v2)
                 if 'google_cloud_run_service' in resource and 'google_cloud_run_v2_job' not in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -268,8 +266,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Cloud Run Jobs
                 elif 'google_cloud_run_v2_job' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -287,8 +285,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Cloud Scheduler jobs
                 elif 'google_cloud_scheduler_job' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -312,8 +310,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Pub/Sub topics
                 elif 'google_pubsub_topic' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -330,8 +328,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Secret Manager secrets
                 elif 'google_secret_manager_secret' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -348,8 +346,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Service accounts (only teardown ones to avoid deleting user SAs)
                 elif 'google_service_account' in resource and 'teardown' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -366,8 +364,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Cloud Build triggers
                 elif 'google_cloudbuild_trigger' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -411,8 +409,8 @@ def upload_resource_manifest(manifest: dict, terraform_dir: Path, project_id: st
     
     try:
         # Get bucket name from Terraform state (same logic as upload_terraform_files_to_gcs)
-        state_proc = subprocess.run(
-            ["terraform", "state", "list"],
+        state_proc = run_tool(
+            "terraform", ["state", "list"],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -430,8 +428,8 @@ def upload_resource_manifest(manifest: dict, terraform_dir: Path, project_id: st
         if not bucket_resource:
             raise Exception("Teardown module bucket not found in state")
         
-        show_proc = subprocess.run(
-            ["terraform", "state", "show", bucket_resource],
+        show_proc = run_tool(
+            "terraform", ["state", "show", bucket_resource],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -563,8 +561,8 @@ def get_version():
         return version("deployml-core")
     except Exception:
         try:
-            result = subprocess.run(
-                ["git", "describe", "--tags", "--abbrev=0"],
+            result = run_tool(
+                "git", ["describe", "--tags", "--abbrev=0"],
                 capture_output=True,
                 text=True,
                 cwd=Path(__file__).parent.parent.parent.parent
@@ -669,9 +667,9 @@ def doctor(
             typer.echo(
                 f"\n Checking enabled APIs for project: {project_id} ..."
             )
-            result = subprocess.run(
+            result = run_tool(
+                "gcloud",
                 [
-                    "gcloud",
                     "services",
                     "list",
                     "--enabled",
@@ -1343,16 +1341,16 @@ def deploy(
     # Auth and ADC were already preflighted above, so just point gcloud at the project.
     typer.echo(f" Deploying {config.get('name', workspace_name)} to {cloud}...")
 
-    subprocess.run(
-        ["gcloud", "config", "set", "project", project_id],
+    run_tool(
+        "gcloud", ["config", "set", "project", project_id],
         cwd=DEPLOYML_TERRAFORM_DIR,
     )
 
     typer.echo(" Initializing Terraform...")
     # Capture stderr so init failures (state lock, missing ADC, bucket perms)
     # surface a real message instead of a silent exit.
-    init_proc = subprocess.run(
-        ["terraform", "init"],
+    init_proc = run_tool(
+        "terraform", ["init"],
         cwd=DEPLOYML_TERRAFORM_DIR,
         capture_output=True,
         text=True,
@@ -1364,8 +1362,8 @@ def deploy(
         raise typer.Exit(code=1)
 
     typer.echo(" Planning deployment...")
-    result = subprocess.run(
-        ["terraform", "plan"],
+    result = run_tool(
+        "terraform", ["plan"],
         cwd=DEPLOYML_TERRAFORM_DIR,
         capture_output=True,
         text=True,
@@ -1443,8 +1441,8 @@ def deploy(
         estimated_time = estimate_terraform_time(result.stdout, "apply")
         typer.echo(f" Applying changes... (Estimated time: {estimated_time})")
         # Re-init before apply; capture stderr to surface failures
-        init_proc2 = subprocess.run(
-            ["terraform", "init"],
+        init_proc2 = run_tool(
+            "terraform", ["init"],
             cwd=DEPLOYML_TERRAFORM_DIR,
             capture_output=True,
             text=True,
@@ -1507,9 +1505,10 @@ def deploy(
                 scheduler_job_name = f"deployml-teardown-{workspace_name}"
                 try:
                     typer.echo(f" Updating teardown schedule to: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-                    update_result = subprocess.run(
+                    update_result = run_tool(
+                        "gcloud",
                         [
-                            "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
+                            "scheduler", "jobs", "update", "http", scheduler_job_name,
                             "--location", region,
                             "--schedule", correct_cron_schedule,
                             "--time-zone", time_zone,
@@ -1544,8 +1543,8 @@ def deploy(
                 typer.echo(f"   To cancel: deployml teardown cancel --config-path {config_path}")
             
             # Show all Terraform outputs in a user-friendly way
-            output_proc = subprocess.run(
-                ["terraform", "output", "-json"],
+            output_proc = run_tool(
+                "terraform", ["output", "-json"],
                 cwd=DEPLOYML_TERRAFORM_DIR,
                 capture_output=True,
                 text=True,
@@ -1662,8 +1661,8 @@ def get_urls(
         typer.echo(f" No deployment found at {terraform_dir}. Run 'deployml deploy' first.")
         raise typer.Exit(code=1)
 
-    output_proc = subprocess.run(
-        ["terraform", "output", "-json"],
+    output_proc = run_tool(
+        "terraform", ["output", "-json"],
         cwd=terraform_dir,
         capture_output=True,
         text=True,
@@ -1724,9 +1723,9 @@ def get_urls(
         # Grafana admin password
         grafana_secret = outputs.get("grafana_admin_password_secret_id", {}).get("value", "")
         if grafana_secret and project_id:
-            fetch = subprocess.run(
-                ["gcloud", "secrets", "versions", "access", "latest",
-                 "--secret", grafana_secret, "--project", project_id],
+            fetch = run_tool(
+                "gcloud", ["secrets", "versions", "access", "latest",
+                           "--secret", grafana_secret, "--project", project_id],
                 capture_output=True, text=True,
             )
             if fetch.returncode == 0:
@@ -1810,8 +1809,8 @@ def destroy(
         typer.echo(f" Destroying infrastructure...")
 
         # Set GCP project
-        subprocess.run(
-            ["gcloud", "config", "set", "project", project_id],
+        run_tool(
+            "gcloud", ["config", "set", "project", project_id],
             cwd=DEPLOYML_TERRAFORM_DIR,
         )
 
@@ -1819,30 +1818,30 @@ def destroy(
         # before attempting to destroy Cloud SQL — otherwise active connections
         # prevent database/user deletion and the destroy fails.
         region = config.get("provider", {}).get("region", "us-central1")
-        cr_result = subprocess.run(
-            ["gcloud", "run", "services", "list",
-             "--project", project_id,
-             "--region", region,
-             "--format", "value(metadata.name)"],
+        cr_result = run_tool(
+            "gcloud", ["run", "services", "list",
+                       "--project", project_id,
+                       "--region", region,
+                       "--format", "value(metadata.name)"],
             capture_output=True, text=True
         )
         if cr_result.returncode == 0:
             services = [s.strip() for s in cr_result.stdout.splitlines() if s.strip()]
             for service in services:
                 typer.echo(f" Deleting Cloud Run service: {service}")
-                subprocess.run(
-                    ["gcloud", "run", "services", "delete", service,
-                     "--project", project_id,
-                     "--region", region,
-                     "--quiet"],
+                run_tool(
+                    "gcloud", ["run", "services", "delete", service,
+                               "--project", project_id,
+                               "--region", region,
+                               "--quiet"],
                     capture_output=True,
                 )
 
         # Remove Cloud SQL databases and user from Terraform state so Terraform
         # doesn't try to delete them individually — the instance deletion handles
         # that automatically, avoiding active-connection errors on destroy.
-        state_result = subprocess.run(
-            ["terraform", "state", "list"],
+        state_result = run_tool(
+            "terraform", ["state", "list"],
             cwd=DEPLOYML_TERRAFORM_DIR,
             capture_output=True,
             text=True,
@@ -1857,8 +1856,8 @@ def destroy(
             ]
             for resource in resources_to_remove:
                 typer.echo(f" Removing from state: {resource}")
-                subprocess.run(
-                    ["terraform", "state", "rm", resource],
+                run_tool(
+                    "terraform", ["state", "rm", resource],
                     cwd=DEPLOYML_TERRAFORM_DIR,
                     capture_output=True,
                 )
@@ -1867,7 +1866,7 @@ def destroy(
         cmd = ["terraform", "destroy", "--auto-approve"]
 
         # Run destroy
-        result = subprocess.run(cmd, cwd=DEPLOYML_TERRAFORM_DIR, check=False)
+        result = run_tool(cmd[0], cmd[1:], cwd=DEPLOYML_TERRAFORM_DIR, check=False)
 
         if result.returncode == 0:
             typer.echo(" Infrastructure destroyed successfully!")
@@ -1877,9 +1876,9 @@ def destroy(
             region = config.get("provider", {}).get("region", "us-central1")
             ar_repo = "mlops-images"
             typer.echo(f" Removing Artifact Registry repo {ar_repo}...")
-            subprocess.run(
-                ["gcloud", "artifacts", "repositories", "delete", ar_repo,
-                 "--location", region, "--project", project_id, "--quiet"],
+            run_tool(
+                "gcloud", ["artifacts", "repositories", "delete", ar_repo,
+                           "--location", region, "--project", project_id, "--quiet"],
                 capture_output=True,
             )
 
@@ -1889,14 +1888,14 @@ def destroy(
             # recreates it on the next build if needed.
             cb_bucket = f"gs://{project_id}_cloudbuild"
             typer.echo(f" Removing Cloud Build staging bucket {cb_bucket}...")
-            subprocess.run(
-                ["gcloud", "storage", "rm", "--recursive", cb_bucket, "--quiet"],
+            run_tool(
+                "gcloud", ["storage", "rm", "--recursive", cb_bucket, "--quiet"],
                 capture_output=True,
             )
 
             if clean_workspace:
                 typer.echo(" Cleaning workspace...")
-                shutil.rmtree(DEPLOYML_DIR)
+                robust_rmtree(DEPLOYML_DIR)
                 typer.echo(" Workspace cleaned")
             elif yes or typer.confirm("Clean up Terraform state files?"):
                 # --yes propagates to the cleanup confirm so scripted runs do not hang
@@ -1945,8 +1944,8 @@ def status(
     marker = deployml_dir / ".project_id"
     if marker.exists():
         typer.echo(f"Project: {marker.read_text().strip()}")
-    out_proc = subprocess.run(
-        ["terraform", "output", "-json"],
+    out_proc = run_tool(
+        "terraform", ["output", "-json"],
         cwd=tf_dir, capture_output=True, text=True,
     )
     if out_proc.returncode == 0 and out_proc.stdout.strip():
@@ -2007,9 +2006,9 @@ def cancel_teardown(config: dict, deployml_dir: Path, workspace_name: str):
     # Delete Cloud Scheduler job. Cloud Scheduler uses --location, not --region.
     # Earlier code passed --region which gcloud rejects, so cancel silently failed.
     scheduler_job_name = f"deployml-teardown-{workspace_name}"
-    result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "delete", scheduler_job_name,
-         "--project", project_id, "--location", region, "--quiet"],
+    result = run_tool(
+        "gcloud", ["scheduler", "jobs", "delete", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--quiet"],
         capture_output=True,
         text=True,
     )
@@ -2033,9 +2032,9 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
     scheduler_job_name = f"deployml-teardown-{workspace_name}"
     
     # Query Cloud Scheduler job
-    result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
-         "--project", project_id, "--location", region, "--format", "json"],
+    result = run_tool(
+        "gcloud", ["scheduler", "jobs", "describe", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--format", "json"],
         capture_output=True,
         text=True,
     )
@@ -2130,9 +2129,9 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
     scheduler_job_name = f"deployml-teardown-{workspace_name}"
     
     # Check if Cloud Scheduler job exists
-    result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
-         "--project", project_id, "--location", region, "--format", "json"],
+    result = run_tool(
+        "gcloud", ["scheduler", "jobs", "describe", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--format", "json"],
         capture_output=True,
         text=True,
     )
@@ -2182,9 +2181,10 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
     # Update Cloud Scheduler job
     typer.echo("\n Updating Cloud Scheduler job...")
     typer.echo(f"   Cron schedule: {new_cron_schedule}")
-    update_result = subprocess.run(
+    update_result = run_tool(
+        "gcloud",
         [
-            "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
+            "scheduler", "jobs", "update", "http", scheduler_job_name,
             "--location", region,
             "--schedule", new_cron_schedule,
             "--time-zone", time_zone,
@@ -2202,9 +2202,9 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
         raise typer.Exit(code=1)
     
     # Verify the update by querying the job again
-    verify_result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
-         "--project", project_id, "--location", region, "--format", "json"],
+    verify_result = run_tool(
+        "gcloud", ["scheduler", "jobs", "describe", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--format", "json"],
         capture_output=True,
         text=True,
     )
@@ -2310,9 +2310,9 @@ def init(
         typer.echo(
             f" Enabling required GCP APIs for project: {project_id} ..."
         )
-        result = subprocess.run(
+        result = run_tool(
+            "gcloud",
             [
-                "gcloud",
                 "services",
                 "enable",
                 *REQUIRED_GCP_APIS,
@@ -2654,7 +2654,7 @@ def gke_cluster_create(
         ]
     typer.echo(f" Creating {'Autopilot' if autopilot else 'standard'} cluster {cluster}...")
     typer.echo("   This typically takes 5 to 10 minutes.")
-    result = subprocess.run(cmd, capture_output=False, text=True)
+    result = run_tool(cmd[0], cmd[1:], capture_output=False, text=True)
     if result.returncode != 0:
         raise typer.Exit(code=1)
     typer.secho(f" Cluster {cluster} created.", fg=typer.colors.GREEN)
@@ -2709,10 +2709,31 @@ def gke_destroy(
         typer.echo("Either --zone or --region must be provided")
         raise typer.Exit(code=1)
 
-    from deployml.utils.kubernetes_gke import connect_to_gke_cluster
+    from deployml.utils.kubernetes_gke import (
+        connect_to_gke_cluster,
+        get_pvc_volume_handle,
+        disk_ref_from_volume_handle,
+        delete_gce_disk_if_exists,
+    )
 
     if not connect_to_gke_cluster(project, cluster, zone, region):
         raise typer.Exit(code=1)
+
+    # Capture the PVC's backing PersistentDisk BEFORE teardown. With
+    # --delete-cluster the in-cluster CSI driver can be removed before it finishes
+    # reclaiming the PD asynchronously, which orphans a billing disk (concern C12).
+    # We capture only the disk our own PVC created, then guarantee its removal
+    # after the cluster is gone.
+    pvc_disk_ref = None
+    if delete_cluster:
+        pvc_manifest = manifest_dir / "pvc.yaml"
+        if pvc_manifest.exists():
+            try:
+                pvc_name = yaml.safe_load(pvc_manifest.read_text())["metadata"]["name"]
+                handle = get_pvc_volume_handle(pvc_name, namespace)
+                pvc_disk_ref = disk_ref_from_volume_handle(handle) if handle else None
+            except Exception:
+                pvc_disk_ref = None
 
     # Delete in reverse order: service, then deployment, then PVC last. The PVC
     # is deleted explicitly because its backing PersistentDisk bills even after
@@ -2722,8 +2743,8 @@ def gke_destroy(
         f = manifest_dir / fname
         if f.exists():
             typer.echo(f" Deleting {fname}...")
-            result = subprocess.run(
-                ["kubectl", "delete", "-f", str(f), "--ignore-not-found"] + ns,
+            result = run_tool(
+                "kubectl", ["delete", "-f", str(f), "--ignore-not-found"] + ns,
                 capture_output=True, text=True,
             )
             if result.returncode == 0:
@@ -2745,9 +2766,9 @@ def gke_destroy(
                 image = ""
         if image.startswith("gcr.io/"):
             typer.echo(f" Removing image {image}...")
-            subprocess.run(
-                ["gcloud", "container", "images", "delete", image,
-                 "--force-delete-tags", "--quiet", "--project", project],
+            run_tool(
+                "gcloud", ["container", "images", "delete", image,
+                           "--force-delete-tags", "--quiet", "--project", project],
                 capture_output=True,
             )
 
@@ -2765,9 +2786,14 @@ def gke_destroy(
         # billing. Retry until the in-flight operation clears.
         loc = zone or region
         for attempt in range(6):
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = run_tool(cmd[0], cmd[1:], capture_output=True, text=True)
             if result.returncode == 0:
                 typer.echo(f" Cluster {cluster} deleted")
+                # The cluster is gone, so the CSI driver can no longer reclaim the
+                # PVC's PersistentDisk. Guarantee that one disk is removed. No-op
+                # if the driver already reclaimed it before the cluster delete.
+                if pvc_disk_ref:
+                    delete_gce_disk_if_exists(project, pvc_disk_ref)
                 break
             if "incompatible operation" in (result.stderr or "").lower():
                 typer.echo("   Cluster busy with another operation, retrying in 20s...")
@@ -3085,6 +3111,10 @@ def main():
     """
     Entry point for the DeployML CLI.
     """
+    # Force UTF-8 on the Windows console first so any emoji or box glyph in command
+    # output cannot raise UnicodeEncodeError on a legacy cp1252 console. No-op off
+    # Windows.
+    configure_console_encoding()
     cli()
 
 

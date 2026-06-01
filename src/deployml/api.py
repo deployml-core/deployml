@@ -29,11 +29,11 @@ Example usage:
     )
 """
 import json
-import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
+from .utils.platform_compat import run_tool
 from .utils.teardown import (
     calculate_cron_from_timestamp,
     load_deployment_metadata,
@@ -68,9 +68,9 @@ def get_teardown_status(
     """
     scheduler_job_name = f"deployml-teardown-{workspace_name}"
     
-    result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
-         "--project", project_id, "--location", region, "--format", "json"],
+    result = run_tool(
+        "gcloud", ["scheduler", "jobs", "describe", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--format", "json"],
         capture_output=True,
         text=True,
     )
@@ -141,9 +141,9 @@ def update_teardown_schedule(
     scheduler_job_name = f"deployml-teardown-{workspace_name}"
     
     # Check if job exists and get current timezone
-    result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
-         "--project", project_id, "--location", region, "--format", "json"],
+    result = run_tool(
+        "gcloud", ["scheduler", "jobs", "describe", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--format", "json"],
         capture_output=True,
         text=True,
     )
@@ -168,9 +168,10 @@ def update_teardown_schedule(
     new_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
     
     # Update Cloud Scheduler job
-    update_result = subprocess.run(
+    update_result = run_tool(
+        "gcloud",
         [
-            "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
+            "scheduler", "jobs", "update", "http", scheduler_job_name,
             "--location", region,
             "--schedule", new_cron_schedule,
             "--time-zone", time_zone,
@@ -231,9 +232,9 @@ def cancel_teardown(
     """
     scheduler_job_name = f"deployml-teardown-{workspace_name}"
     
-    result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "delete", scheduler_job_name,
-         "--project", project_id, "--location", region, "--quiet"],
+    result = run_tool(
+        "gcloud", ["scheduler", "jobs", "delete", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--quiet"],
         capture_output=True,
         text=True,
     )
