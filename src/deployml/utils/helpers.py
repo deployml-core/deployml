@@ -9,7 +9,6 @@ import random
 import string
 from deployml.utils.constants import ANIMAL_NAMES, FALLBACK_WORDS, TERRAFORM_DIR
 from deployml.utils.platform_compat import run_tool, resolve_tool, terraform_env
-import subprocess
 import time
 from rich.progress import (
     Progress,
@@ -435,8 +434,6 @@ def cleanup_terraform_files(terraform_dir: Path):
     """
     Clean up Terraform state and lock files from the specified directory.
     """
-    import shutil
-
     cleanup_files = [
         ".terraform",
         "terraform.tfstate",
