@@ -30,6 +30,12 @@ deployml = "deployml.cli.cli:main"
 [tool.poetry]
 packages = [{include = "deployml", from = "src"}]
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools]
 include-package-data = true
 
