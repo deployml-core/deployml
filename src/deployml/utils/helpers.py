@@ -102,6 +102,16 @@ def copy_modules_to_workspace(
     # BigQuery is always included — provides the mlops dataset and tables
     used_modules.add("bigquery")
 
+    # cloud_sql_postgres is needed when mlflow or feast uses a postgresql backend.
+    # This mirrors the template's flags.needs_postgres logic so the module source
+    # reference in the rendered main.tf can always be resolved.
+    for stage in stack:
+        for stage_name, tool in stage.items():
+            if tool.get("name") in ("mlflow", "feast"):
+                backend = tool.get("params", {}).get("backend_store_uri", "")
+                if backend.startswith("postgresql"):
+                    used_modules.add("cloud_sql_postgres")
+
     # Only copy the modules that are being used, and only the specific deployment type
     for module_path in MODULE_TEMPLATES_DIR.iterdir():
         if module_path.is_dir() and module_path.name in used_modules:

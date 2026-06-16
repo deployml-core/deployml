@@ -41,6 +41,7 @@ from deployml.utils.helpers import (
 )
 from deployml.utils.infracost import (
     check_infracost_available,
+    check_infracost_authenticated,
     run_infracost_analysis,
     format_cost_for_confirmation,
 )
@@ -529,6 +530,13 @@ def doctor(
     # Infracost
     if infracost_installed:
         typer.secho("\n Infracost is installed", fg=typer.colors.GREEN)
+        if check_infracost_authenticated():
+            typer.secho("   Infracost is authenticated", fg=typer.colors.GREEN)
+        else:
+            typer.secho(
+                "   Infracost not authenticated — run: infracost auth login",
+                fg=typer.colors.YELLOW,
+            )
     else:
         typer.secho(
             "\nWARNING: Infracost not installed (optional)", fg=typer.colors.YELLOW
@@ -776,6 +784,212 @@ def terraform(
         output_dir = Path.cwd() / ".deployml" / "terraform" / config["name"]
     else:
         output_dir = Path(output_dir)
+
+
+@cli.command()
+def estimate(
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config-path", "-c", help="Path to YAML config file"
+    ),
+):
+    """Estimate monthly infrastructure cost without deploying anything."""
+    import tempfile
+    import shutil as _shutil
+    import hashlib as _hashlib
+
+    if not check_infracost_available():
+        typer.echo(" Infracost is not installed.")
+        typer.echo("   Install: https://www.infracost.io/docs/#quick-start")
+        raise typer.Exit(code=1)
+
+    if not check_infracost_authenticated():
+        typer.echo(" Infracost is not authenticated.")
+        typer.echo("   Run: infracost auth login")
+        typer.echo("   Or set: export INFRACOST_API_KEY=<your-key>")
+        raise typer.Exit(code=1)
+
+    if not config_path.exists():
+        typer.echo(f" Config file not found: {config_path}")
+        raise typer.Exit(code=1)
+
+    config = yaml.safe_load(config_path.read_text())
+    cloud = config["provider"]["name"]
+    project_id = config["provider"]["project_id"]
+    region = config["provider"]["region"]
+    deployment_type = config["deployment"]["type"]
+    stack = config.get("stack", [])
+    workspace_name = config.get("name") or "development"
+
+    if deployment_type == "gke":
+        typer.echo(" Cost estimation is not supported for GKE deployments.")
+        raise typer.Exit(code=1)
+
+    teardown_config = config.get("teardown", {})
+    teardown_enabled = teardown_config.get("enabled", False)
+
+    # Auto-resolve image URIs so templates render with valid image paths
+    _TOOL_IMAGE_NAMES = {
+        "mlflow": "mlflow",
+        "feast": "feast",
+        "fastapi": "fastapi",
+        "grafana": "grafana-container",
+        "wandb": "wandb",
+    }
+    _ar_base = f"{region}-docker.pkg.dev/{project_id}/mlops-images"
+    for stage in stack:
+        for stage_name, tool in stage.items():
+            tool_name = tool.get("name", "")
+            params = tool.setdefault("params", {})
+            existing_image = params.get("image", "")
+            if not existing_image or existing_image.startswith("gcr.io/"):
+                image_name = _TOOL_IMAGE_NAMES.get(tool_name)
+                if image_name:
+                    params["image"] = f"{_ar_base}/{image_name}:latest"
+            if stage_name == "workflow_orchestration" and tool_name == "cron":
+                for job in params.get("jobs", []):
+                    if not job.get("image") or job.get("image", "").startswith("gcr.io/"):
+                        job_name = job.get("service_name", "")
+                        job["image"] = f"{_ar_base}/{job_name}:latest"
+
+    # Build bucket_configs without GCS calls — estimate doesn't need live cloud state
+    bucket_configs = []
+    for stage in stack:
+        for stage_name, tool in stage.items():
+            if tool.get("params", {}).get("artifact_bucket"):
+                bucket_configs.append({
+                    "stage": stage_name,
+                    "tool": tool["name"],
+                    "bucket_name": tool["params"]["artifact_bucket"],
+                    "create": tool["params"].get("create_artifact_bucket", True),
+                    "exists": False,
+                })
+    create_artifact_bucket = any(c["create"] for c in bucket_configs)
+
+    name_material = f"{workspace_name}:{project_id}".encode("utf-8")
+    name_hash = _hashlib.sha1(name_material).hexdigest()[:6]
+
+    warning_threshold = config.get("cost_analysis", {}).get("warning_threshold", 100.0)
+
+    temp_dir = Path(tempfile.mkdtemp())
+    modules_dir = temp_dir / "modules"
+    modules_dir.mkdir()
+
+    try:
+        copy_modules_to_workspace(
+            modules_dir,
+            stack=stack,
+            deployment_type=deployment_type,
+            cloud=cloud,
+            teardown_enabled=teardown_enabled,
+        )
+
+        env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
+        if deployment_type == "cloud_run":
+            if any(tool.get("name") == "wandb" for stage in stack for tool in stage.values()):
+                main_template = env.get_template(f"{cloud}/{deployment_type}/wandb_main.tf.j2")
+            elif any(tool.get("name") == "mlflow" for stage in stack for tool in stage.values()):
+                main_template = env.get_template(f"{cloud}/{deployment_type}/mlflow_main.tf.j2")
+            else:
+                main_template = env.get_template(f"{cloud}/{deployment_type}/main.tf.j2")
+        else:
+            main_template = env.get_template(f"{cloud}/{deployment_type}/main.tf.j2")
+
+        var_template = env.get_template(f"{cloud}/{deployment_type}/variables.tf.j2")
+        tfvars_template = env.get_template(f"{cloud}/{deployment_type}/terraform.tfvars.j2")
+
+        render_kwargs = dict(
+            cloud=cloud,
+            stack=stack,
+            deployment_type=deployment_type,
+            create_artifact_bucket=create_artifact_bucket,
+            bucket_configs=bucket_configs,
+            project_id=project_id,
+            stack_name=workspace_name,
+            name_hash=name_hash,
+            teardown_config=None,
+            teardown_cron_schedule="",
+            teardown_scheduled_timestamp=0,
+        )
+        if deployment_type == "cloud_vm":
+            render_kwargs["region"] = region
+            render_kwargs["zone"] = config["provider"].get("zone", f"{region}-a")
+
+        main_tf = main_template.render(**render_kwargs)
+        variables_tf = var_template.render(
+            stack=stack,
+            cloud=cloud,
+            project_id=project_id,
+            stack_name=workspace_name,
+            name_hash=name_hash,
+        )
+        tfvars_content = tfvars_template.render(
+            project_id=project_id,
+            region=region,
+            zone=config["provider"].get("zone", f"{region}-a"),
+            stack=stack,
+            cloud=cloud,
+            create_artifact_bucket=create_artifact_bucket,
+            stack_name=workspace_name,
+            name_hash=name_hash,
+        )
+
+        (temp_dir / "main.tf").write_text(main_tf)
+        (temp_dir / "variables.tf").write_text(variables_tf)
+        (temp_dir / "terraform.tfvars").write_text(tfvars_content)
+
+        typer.echo(f" Estimating cost for: {workspace_name}")
+        analysis = run_infracost_analysis(temp_dir, warning_threshold, show_resources=True)
+
+        if analysis is None:
+            typer.secho(" Cost estimate unavailable.", fg=typer.colors.YELLOW)
+            raise typer.Exit(code=1)
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f" Estimate failed: {e}")
+        raise typer.Exit(code=1)
+    finally:
+        _shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@cli.command()
+def costs(
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config-path", "-c", help="Path to YAML config file"
+    ),
+):
+    """Show the monthly cost of your currently running deployment."""
+    if not check_infracost_available():
+        typer.echo(" Infracost is not installed.")
+        typer.echo("   Install: https://www.infracost.io/docs/#quick-start")
+        raise typer.Exit(code=1)
+
+    if not check_infracost_authenticated():
+        typer.echo(" Infracost is not authenticated.")
+        typer.echo("   Run: infracost auth login")
+        raise typer.Exit(code=1)
+
+    if not config_path.exists():
+        typer.echo(f" Config file not found: {config_path}")
+        raise typer.Exit(code=1)
+
+    config = yaml.safe_load(config_path.read_text())
+    workspace_name = config.get("name") or "development"
+    terraform_dir = Path.cwd() / ".deployml" / workspace_name / "terraform"
+
+    if not terraform_dir.exists():
+        typer.echo(f" No deployment found at {terraform_dir}")
+        typer.echo("   Run 'deployml deploy' to deploy, or 'deployml estimate' for a pre-deploy cost prediction.")
+        raise typer.Exit(code=1)
+
+    warning_threshold = config.get("cost_analysis", {}).get("warning_threshold", 100.0)
+    typer.echo(f" Checking costs for running deployment: {workspace_name}")
+    analysis = run_infracost_analysis(terraform_dir, warning_threshold, show_resources=True)
+
+    if analysis is None:
+        typer.secho(" Cost check unavailable.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
 
 
 @cli.command()
@@ -1210,50 +1424,7 @@ def deploy(
 
     cost_analysis = None
     if cost_enabled:
-        usage_file_path = cost_config.get("usage_file")
-        usage_file = Path(usage_file_path) if usage_file_path else None
-
-        # If no explicit usage file provided, generate one from high-level YAML values
-        if usage_file is None:
-            try:
-                bucket_amount = cost_config.get("bucket_amount")
-                cloudsql_amount = cost_config.get(
-                    "cloudSQL_amount"
-                ) or cost_config.get("cloudsql_amount")
-                bigquery_amount = cost_config.get(
-                    "bigQuery_amount"
-                ) or cost_config.get("bigquery_amount")
-
-                resource_type_default_usage = {}
-                # Map high-level amounts to Infracost resource defaults
-                if bucket_amount is not None:
-                    resource_type_default_usage["google_storage_bucket"] = {
-                        "storage_gb": float(bucket_amount)
-                    }
-                if cloudsql_amount is not None:
-                    resource_type_default_usage[
-                        "google_sql_database_instance"
-                    ] = {"storage_gb": float(cloudsql_amount)}
-                if bigquery_amount is not None:
-                    resource_type_default_usage["google_bigquery_table"] = {
-                        "storage_gb": float(bigquery_amount)
-                    }
-
-                if resource_type_default_usage:
-                    usage_yaml = {
-                        "version": "0.1",
-                        "resource_type_default_usage": resource_type_default_usage,
-                    }
-                    usage_file = DEPLOYML_TERRAFORM_DIR / "infracost-usage.yml"
-                    with open(usage_file, "w") as f:
-                        yaml.safe_dump(usage_yaml, f, sort_keys=False)
-            except Exception:
-                # If usage-file generation fails, continue without it
-                usage_file = None
-
-        cost_analysis = run_infracost_analysis(
-            DEPLOYML_TERRAFORM_DIR, warning_threshold, usage_file=usage_file
-        )
+        cost_analysis = run_infracost_analysis(DEPLOYML_TERRAFORM_DIR, warning_threshold)
 
     # Format confirmation message with cost information
     if cost_analysis:

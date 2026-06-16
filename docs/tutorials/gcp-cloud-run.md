@@ -9,6 +9,11 @@ Make sure `deployml doctor` passes before starting. You will need:
 - `gcloud` CLI, authenticated (`gcloud auth login` and `gcloud auth application-default login`)
 - Docker (running)
 - Terraform
+- Infracost (optional, for cost estimates):
+  ```bash
+  brew install infracost
+  infracost auth login
+  ```
 
 ## 1. Create a GCP Project
 
@@ -70,6 +75,16 @@ stack:
 - `experiment_tracking` + `artifact_tracking` + `model_registry` — these three together deploy a single MLflow server backed by Cloud SQL (Postgres) for metadata and a GCS bucket for artifacts
 - `model_serving` — deploys a FastAPI container that pulls the latest registered model from MLflow on startup
 - `model_monitoring` — deploys Grafana connected to the Postgres `metrics` database
+
+## 3.5 Estimate Costs (Optional)
+
+Check what the stack will cost before committing to a 20-minute deploy:
+
+```bash
+deployml estimate
+```
+
+No GCP credentials required, no infrastructure touched. A standard Cloud Run stack runs around **$34/month** — almost entirely Cloud SQL. See [Cost Estimates](../features/costs.md).
 
 ## 4. Build Docker Images
 
@@ -151,6 +166,14 @@ You should see `offline_features`, `predictions`, `ground_truth`, and `drift_met
 ## 8. Run the End-to-End Example
 
 With the stack running, follow the [example walkthrough](example.md) to train a model, register it, serve predictions through FastAPI, and visualize drift metrics in Grafana.
+
+## 8.5 Check Running Costs
+
+```bash
+deployml costs
+```
+
+Shows what your deployed stack is currently costing. Cloud SQL is the main driver at ~$34/month — everything else scales to zero.
 
 ## 9. Teardown
 
