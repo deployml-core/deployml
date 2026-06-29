@@ -4,9 +4,7 @@ FROM grafana/grafana:10.4.5
 USER root
 
 # Configure Grafana to listen on Cloud Run's expected port
-ENV GF_SERVER_HTTP_PORT=8080 \
-    GF_SECURITY_ADMIN_USER=admin \
-    GF_SECURITY_ADMIN_PASSWORD=admin
+ENV GF_SERVER_HTTP_PORT=8080
 
 # Copy entrypoint script and set permissions 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

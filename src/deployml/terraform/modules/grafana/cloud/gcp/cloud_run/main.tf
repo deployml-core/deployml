@@ -48,6 +48,14 @@ resource "google_cloud_run_service" "grafana" {
           name  = "GF_SERVER_HTTP_PORT"
           value = "8080"
         }
+        env {
+          name  = "GF_SECURITY_ADMIN_USER"
+          value = var.grafana_admin_user
+        }
+        env {
+          name  = "GF_SECURITY_ADMIN_PASSWORD"
+          value = var.grafana_admin_password
+        }
       }
     }
   }

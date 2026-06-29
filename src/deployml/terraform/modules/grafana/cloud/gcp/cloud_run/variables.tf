@@ -53,3 +53,16 @@ variable "cloudsql_instance_annotation" {
   description = "Cloud SQL instance connection annotation"
   default     = ""
 }
+
+variable "grafana_admin_user" {
+  type        = string
+  description = "Admin username for Grafana"
+  default     = "admin"
+}
+
+variable "grafana_admin_password" {
+  type        = string
+  description = "Admin password for Grafana"
+  default     = "admin"
+  sensitive   = true
+}
