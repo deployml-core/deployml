@@ -1,16 +1,25 @@
 resource "google_bigquery_dataset" "mlops" {
-  project    = var.project_id
-  dataset_id = var.dataset_id
-  location   = var.region
+  project                    = var.project_id
+  dataset_id                 = var.dataset_id
+  location                   = var.region
+  delete_contents_on_destroy = true
 }
 
- resource "google_bigquery_table" "drift_metrics" {
+# Partitioning by date keeps Grafana queries bounded and stops full table
+# scans from running away as the table grows. Same for ground_truth and
+# predictions, which both grow per request.
+resource "google_bigquery_table" "drift_metrics" {
   dataset_id = google_bigquery_dataset.mlops.dataset_id
   table_id   = "drift_metrics"
   project    = var.project_id
 
-  schema = file("${path.module}/schemas/drift_metrics.json")
+  schema              = file("${path.module}/schemas/drift_metrics.json")
   deletion_protection = false
+
+  time_partitioning {
+    type  = "DAY"
+    field = "metric_timestamp"
+  }
 }
 
 resource "google_bigquery_table" "ground_truth" {
@@ -18,8 +27,13 @@ resource "google_bigquery_table" "ground_truth" {
   table_id   = "ground_truth"
   project    = var.project_id
 
-  schema = file("${path.module}/schemas/ground_truth.json")
+  schema              = file("${path.module}/schemas/ground_truth.json")
   deletion_protection = false
+
+  time_partitioning {
+    type  = "DAY"
+    field = "event_timestamp"
+  }
 }
 
 resource "google_bigquery_table" "offline_features" {
@@ -27,7 +41,7 @@ resource "google_bigquery_table" "offline_features" {
   table_id   = "offline_features"
   project    = var.project_id
 
-  schema = file("${path.module}/schemas/offline_features.json")
+  schema              = file("${path.module}/schemas/offline_features.json")
   deletion_protection = false
 }
 
@@ -36,7 +50,11 @@ resource "google_bigquery_table" "predictions" {
   table_id   = "predictions"
   project    = var.project_id
 
-  schema = file("${path.module}/schemas/predictions.json")
+  schema              = file("${path.module}/schemas/predictions.json")
   deletion_protection = false
-}
 
+  time_partitioning {
+    type  = "DAY"
+    field = "prediction_timestamp"
+  }
+}

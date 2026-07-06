@@ -203,8 +203,6 @@ module "{{ stage_name }}_{{ tool.name }}" {
   cpu_limit           = var.cpu_limit
   memory_limit        = var.memory_limit
   allow_public_access = var.allow_public_access
-  grafana_admin_user      = "{{ tool.params.get('grafana_admin_user', 'admin') }}"
-  grafana_admin_password  = "{{ tool.params.get('grafana_admin_password', 'admin') }}"
   {% if flags.needs_postgres %}
   metrics_connection_string = module.cloud_sql_postgres.grafana_connection_string_cloud_sql
   use_metrics_database = true

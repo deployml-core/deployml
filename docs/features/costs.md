@@ -33,7 +33,7 @@ Here are estimated typical costs for several **GCP** services, but please do not
 - Google Cloud Storage costs approximately $0.020 per GB per month.   
 - BigQuery storage costs $0.020 per GB per month with query costs based on data scanned.  
 - Cloud VMs cost approximately $25 per month for medium instances.   
-- GKE clusters have no management fee, but you pay for VM instances and load balancers. Note that the GKE can get very expensive very quickly.
+- GKE clusters have no management fee, but you pay for VM instances and load balancers. MLflow on GKE also provisions a small PersistentDisk for its data, a few cents per GB-month. Note that GKE can get expensive quickly.
 
 
 
@@ -41,6 +41,6 @@ Here are estimated typical costs for several **GCP** services, but please do not
 
 Here are some tips to keep the costs low while you are learning:  
 
-- Use SQLite instead of Cloud SQL whenever possible, particularly for development purposes and when your data is small.  
+- Use SQLite instead of Cloud SQL whenever possible, particularly for development purposes and when your data is small. The minikube and GKE MLflow paths already do this, sqlite on a PersistentVolumeClaim, so they avoid the always-on Cloud SQL cost.  
 - Enable auto-teardown to prevent forgotten deployments. 
 - Use Cloud Run for variable workloads to take advantage of scale-to-zero pricing.

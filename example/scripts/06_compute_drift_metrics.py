@@ -7,13 +7,16 @@ Metrics computed:
 """
 import os
 import numpy as np
+from pathlib import Path
 from datetime import datetime, timezone
 from google.cloud import bigquery
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path.cwd() / ".env")
 
-PROJECT      = os.environ["BIGQUERY_PROJECT"]
+PROJECT = os.environ.get("BIGQUERY_PROJECT")
+if not PROJECT:
+    raise SystemExit("BIGQUERY_PROJECT missing. Run `deployml get-urls` to write .env.")
 DATASET      = os.getenv("BIGQUERY_DATASET", "mlops")
 FEATURE_COLS = ["bedrooms", "bathrooms", "area_sqft", "lot_size", "year_built", "city", "state"]
 

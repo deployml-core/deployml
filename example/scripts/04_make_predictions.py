@@ -4,13 +4,16 @@ FastAPI automatically logs each prediction to the BigQuery predictions table.
 """
 import os
 import requests
+from pathlib import Path
 from google.cloud import bigquery
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path.cwd() / ".env")
 
-FASTAPI_URL = os.environ["FASTAPI_URL"]
-PROJECT     = os.environ["BIGQUERY_PROJECT"]
+FASTAPI_URL = os.environ.get("FASTAPI_URL")
+PROJECT     = os.environ.get("BIGQUERY_PROJECT")
+if not FASTAPI_URL or not PROJECT:
+    raise SystemExit("FASTAPI_URL or BIGQUERY_PROJECT missing. Run `deployml get-urls` to write .env.")
 DATASET     = os.getenv("BIGQUERY_DATASET", "mlops")
 N_PREDICT   = 50
 

@@ -1,8 +1,6 @@
 import sys
 import yaml
 import typer
-import shutil
-import subprocess
 import re
 import importlib.resources as pkg_resources
 from deployml.utils.constants import (
@@ -12,6 +10,7 @@ from deployml.utils.constants import (
     ANIMAL_NAMES,
     FALLBACK_WORDS,
     REQUIRED_GCP_APIS,
+    REQUIRED_GCP_IAM_ROLES,
 )
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
@@ -27,6 +26,13 @@ from deployml.notebook.docker import build_images
 from deployml.utils.helpers import (
     check,
     check_gcp_auth,
+    check_gcp_adc,
+    check_bq,
+    get_terraform_version,
+    validate_gcp_project,
+    validate_gcp_region,
+    get_missing_iam_roles,
+    check_docker_daemon,
     copy_modules_to_workspace,
     bucket_exists,
     generate_bucket_name,
@@ -36,6 +42,7 @@ from deployml.utils.helpers import (
     run_terraform_with_loading_bar,
     _create_docker_folder,
 )
+from deployml.utils.platform_compat import run_tool, resolve_tool, configure_console_encoding, robust_rmtree
 from deployml.utils.infracost import (
     check_infracost_available,
     run_infracost_analysis,
@@ -70,8 +77,8 @@ def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspac
     try:
         # Get terraform files bucket from Terraform state
         # The bucket is created by the teardown module
-        state_proc = subprocess.run(
-            ["terraform", "state", "list"],
+        state_proc = run_tool(
+            "terraform", ["state", "list"],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -93,8 +100,8 @@ def upload_terraform_files_to_gcs(terraform_dir: Path, project_id: str, workspac
             return
         
         # Get bucket name from state
-        show_proc = subprocess.run(
-            ["terraform", "state", "show", bucket_resource],
+        show_proc = run_tool(
+            "terraform", ["state", "show", bucket_resource],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -149,7 +156,6 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
     Returns a manifest dictionary with all resources that need to be deleted.
     """
     import json
-    import subprocess
     from urllib.parse import urlparse
     
     manifest = {
@@ -170,13 +176,13 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
     }
     
     # Get Terraform outputs
-    output_proc = subprocess.run(
-        ["terraform", "output", "-json"],
+    output_proc = run_tool(
+        "terraform", ["output", "-json"],
         cwd=terraform_dir,
         capture_output=True,
         text=True,
     )
-    
+
     if output_proc.returncode == 0:
         outputs = json.loads(output_proc.stdout)
         
@@ -206,8 +212,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                     })
     
     # Query Terraform state for additional resources
-    state_proc = subprocess.run(
-        ["terraform", "state", "list"],
+    state_proc = run_tool(
+        "terraform", ["state", "list"],
         cwd=terraform_dir,
         capture_output=True,
         text=True,
@@ -220,8 +226,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
             try:
                 # Cloud Run services (v1 and v2)
                 if 'google_cloud_run_service' in resource and 'google_cloud_run_v2_job' not in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -257,8 +263,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Cloud Run Jobs
                 elif 'google_cloud_run_v2_job' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -276,8 +282,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Cloud Scheduler jobs
                 elif 'google_cloud_scheduler_job' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -301,8 +307,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Pub/Sub topics
                 elif 'google_pubsub_topic' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -319,8 +325,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Secret Manager secrets
                 elif 'google_secret_manager_secret' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -337,8 +343,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Service accounts (only teardown ones to avoid deleting user SAs)
                 elif 'google_service_account' in resource and 'teardown' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -355,8 +361,8 @@ def extract_resource_manifest(terraform_dir: Path, project_id: str, workspace_na
                 
                 # Cloud Build triggers
                 elif 'google_cloudbuild_trigger' in resource:
-                    show_proc = subprocess.run(
-                        ["terraform", "state", "show", resource],
+                    show_proc = run_tool(
+                        "terraform", ["state", "show", resource],
                         cwd=terraform_dir,
                         capture_output=True,
                         text=True,
@@ -400,8 +406,8 @@ def upload_resource_manifest(manifest: dict, terraform_dir: Path, project_id: st
     
     try:
         # Get bucket name from Terraform state (same logic as upload_terraform_files_to_gcs)
-        state_proc = subprocess.run(
-            ["terraform", "state", "list"],
+        state_proc = run_tool(
+            "terraform", ["state", "list"],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -419,8 +425,8 @@ def upload_resource_manifest(manifest: dict, terraform_dir: Path, project_id: st
         if not bucket_resource:
             raise Exception("Teardown module bucket not found in state")
         
-        show_proc = subprocess.run(
-            ["terraform", "state", "show", bucket_resource],
+        show_proc = run_tool(
+            "terraform", ["state", "show", bucket_resource],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -455,6 +461,96 @@ import time
 import json
 from datetime import datetime, timedelta
 
+def _load_config_or_exit(config_path: Path) -> dict:
+    """Load YAML config with clean error messages. Exits non-zero on failure."""
+    try:
+        data = yaml.safe_load(config_path.read_text())
+    except yaml.YAMLError as e:
+        typer.secho(f" Config file is not valid YAML: {e}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    if not isinstance(data, dict):
+        typer.secho(
+            f" Config file must be a YAML mapping at the top level, got {type(data).__name__}.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    return data
+
+
+_SUPPORTED_PROVIDERS = {"gcp", "aws", "azure"}
+
+
+def _validate_deploy_config_or_exit(config: dict) -> None:
+    """Validate the fields deploy and destroy need. Exits non-zero on missing or bad values."""
+    provider = config.get("provider")
+    if not isinstance(provider, dict):
+        typer.secho(" Config is missing required field: provider (mapping).", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    name = provider.get("name")
+    if name not in _SUPPORTED_PROVIDERS:
+        typer.secho(
+            f" provider.name must be one of {sorted(_SUPPORTED_PROVIDERS)}, got {name!r}.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    if name == "gcp" and not provider.get("project_id"):
+        typer.secho(" GCP config is missing provider.project_id.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    deployment = config.get("deployment")
+    if not isinstance(deployment, dict) or not deployment.get("type"):
+        typer.secho(" Config is missing required field: deployment.type.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    # Validate the stack shape so a malformed entry fails here with a clear message
+    # instead of crashing later with "'set' object has no attribute 'get'" when the
+    # deploy loop calls tool.get(...) (issue #53). YAML flow like {a, b} or an
+    # explicit !!set tag parses as a set, not the mapping the stack expects.
+    stack = config.get("stack")
+    if stack is not None:
+        if not isinstance(stack, list):
+            typer.secho(
+                f" config.stack must be a list of stage mappings, got {type(stack).__name__}.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+        for i, stage in enumerate(stack):
+            if not isinstance(stage, dict):
+                typer.secho(
+                    f" config.stack[{i}] must be a mapping of stage name to tool config, "
+                    f"got {type(stage).__name__}.",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(code=1)
+            for stage_name, tool in stage.items():
+                if not isinstance(tool, dict):
+                    typer.secho(
+                        f" config.stack[{i}].{stage_name} must be a mapping with at least a "
+                        f"'name', got {type(tool).__name__}. Check for a stray !!set tag or a "
+                        f"list where a mapping is expected.",
+                        fg=typer.colors.RED,
+                    )
+                    raise typer.Exit(code=1)
+
+
+def _gcp_credentials_preflight_or_exit() -> None:
+    """Verify gcloud auth and Application Default Credentials before any GCP deploy
+    work. ADC backs the Terraform google provider, so without it deploy fails
+    opaquely at apply with 'default credentials not found' (issue #54)."""
+    if not check_gcp_auth():
+        typer.secho(
+            " gcloud is not authenticated. Run: gcloud auth login",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    if not check_gcp_adc():
+        typer.secho(
+            " Application Default Credentials are missing. "
+            "Run: gcloud auth application-default login",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+
 def get_version():
     """Get version from package metadata"""
     try:
@@ -462,8 +558,8 @@ def get_version():
         return version("deployml-core")
     except Exception:
         try:
-            result = subprocess.run(
-                ["git", "describe", "--tags", "--abbrev=0"],
+            result = run_tool(
+                "git", ["describe", "--tags", "--abbrev=0"],
                 capture_output=True,
                 text=True,
                 cwd=Path(__file__).parent.parent.parent.parent
@@ -517,9 +613,15 @@ def doctor(
     else:
         typer.secho("\n Docker is not installed", fg=typer.colors.RED)
 
-    # Terraform
+    # Terraform with version gate (need >= 1.0)
     if terraform_installed:
-        typer.secho("\n Terraform is installed", fg=typer.colors.GREEN)
+        tf_ver = get_terraform_version()
+        if tf_ver and tf_ver[0] >= 1:
+            typer.secho(f"\n Terraform {'.'.join(map(str, tf_ver))} (>= 1.0)", fg=typer.colors.GREEN)
+        elif tf_ver:
+            typer.secho(f"\n Terraform {'.'.join(map(str, tf_ver))} found, but requires >= 1.0", fg=typer.colors.RED)
+        else:
+            typer.secho("\n Terraform installed, version unknown", fg=typer.colors.YELLOW)
     else:
         typer.secho("\n Terraform is not installed", fg=typer.colors.RED)
 
@@ -540,11 +642,21 @@ def doctor(
             "\n GCP CLI installed and authenticated", fg=typer.colors.GREEN
         )
         # Check enabled GCP APIs
+        # ADC and bq are required for client libs and BigQuery work
+        if check_gcp_adc():
+            typer.secho("\n GCP Application Default Credentials configured", fg=typer.colors.GREEN)
+        else:
+            typer.secho("\n GCP Application Default Credentials NOT configured", fg=typer.colors.RED)
+            typer.echo("   Fix: gcloud auth application-default login")
+        if check_bq():
+            typer.secho("\n bq CLI is installed", fg=typer.colors.GREEN)
+        else:
+            typer.secho("\n bq CLI not installed", fg=typer.colors.YELLOW)
+            typer.echo("   Fix: gcloud components install bq")
         if not project_id:
-            project_id = typer.prompt(
-                "Enter your GCP Project ID to check enabled APIs",
-                default="",
-                show_default=False,
+            typer.secho(
+                "\nSKIP: API and IAM checks need --project-id. Re-run as: deployml doctor --project-id YOUR_GCP_PROJECT_ID",
+                fg=typer.colors.YELLOW,
             )
         if project_id:
             project_id = project_id.strip()
@@ -552,9 +664,9 @@ def doctor(
             typer.echo(
                 f"\n Checking enabled APIs for project: {project_id} ..."
             )
-            result = subprocess.run(
+            result = run_tool(
+                "gcloud",
                 [
-                    "gcloud",
                     "services",
                     "list",
                     "--enabled",
@@ -589,11 +701,21 @@ def doctor(
                     typer.echo(
                         "You can enable them with: deployml init --provider gcp --project-id <PROJECT_ID>"
                     )
-        elif project_id:  # Empty string after stripping
-            typer.secho(
-                "\nWARNING: No project ID provided. Skipping API check.",
-                fg=typer.colors.YELLOW,
-            )
+            # IAM role probe for the same project
+            missing_roles = get_missing_iam_roles(project_id, REQUIRED_GCP_IAM_ROLES)
+            if not missing_roles:
+                typer.secho(
+                    f"\n IAM roles on {project_id}: all required roles present",
+                    fg=typer.colors.GREEN,
+                )
+            else:
+                typer.secho(
+                    f"\nWARNING: Missing IAM roles on {project_id}:",
+                    fg=typer.colors.YELLOW,
+                )
+                for r in missing_roles:
+                    typer.echo(f"  - {r}")
+                typer.echo("   Fix: grant roles/owner OR each role via gcloud projects add-iam-policy-binding")
     elif gcp_installed:
         typer.secho(
             "\nWARNING: GCP CLI installed but not authenticated",
@@ -616,9 +738,14 @@ def doctor(
 @cli.command()
 def vm():
     """
-    Create a new Virtual Machine (VM) deployment.
+    Create a new Virtual Machine (VM) deployment. NOT YET IMPLEMENTED.
     """
-    pass
+    typer.secho(
+        " The `vm` command is not yet implemented. Use `deployml deploy` with "
+        "deployment.type: cloud_vm in config.yaml.",
+        fg=typer.colors.YELLOW,
+    )
+    raise typer.Exit(code=1)
 
 
 @cli.command()
@@ -634,27 +761,22 @@ def terraform(
     """
     Run Terraform actions (plan, apply, destroy) for the specified stack configuration.
     """
-    print(action)
     if action not in ["plan", "apply", "destroy"]:
         typer.secho(
             f" Invalid action: {action}. Use: plan, apply, destroy",
             fg=typer.colors.RED,
         )
+        raise typer.Exit(code=1)
 
     config_path = Path(stack_config_path)
-
-    print(config_path)
-    try:
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-
-    except Exception as e:
-        typer.secho(
-            f" Failed to load configuration: {e}", fg=typer.colors.RED
-        )
+    if not config_path.exists():
+        typer.secho(f" Config file not found: {config_path}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    config = _load_config_or_exit(config_path)
 
     if not output_dir:
-        output_dir = Path.cwd() / ".deployml" / "terraform" / config["name"]
+        workspace = config.get("name") or "default"
+        output_dir = Path.cwd() / ".deployml" / workspace / "terraform"
     else:
         output_dir = Path(output_dir)
 
@@ -681,7 +803,8 @@ def deploy(
         typer.echo(f" Config file not found: {config_path}")
         raise typer.Exit(code=1)
 
-    config = yaml.safe_load(config_path.read_text())
+    config = _load_config_or_exit(config_path)
+    _validate_deploy_config_or_exit(config)
 
     # --- GCS bucket existence and unique name logic ---
     cloud = config["provider"]["name"]
@@ -718,7 +841,9 @@ def deploy(
                             "postgresql"
                         )
 
-    workspace_name = config.get("name") or "development"
+    # Workspace name MUST match across deploy, get-urls, and destroy.
+    # All three default to "default" when config has no name set.
+    workspace_name = config.get("name") or "default"
 
     DEPLOYML_DIR = Path.cwd() / ".deployml" / workspace_name
     DEPLOYML_TERRAFORM_DIR = DEPLOYML_DIR / "terraform"
@@ -730,7 +855,34 @@ def deploy(
     DEPLOYML_TERRAFORM_DIR.mkdir(parents=True, exist_ok=True)
     DEPLOYML_MODULES_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Project ID drift detection. If this workspace was previously deployed to a
+    # different project, fail fast so we do not orphan resources in the old one.
+    project_marker = DEPLOYML_DIR / ".project_id"
+    if cloud == "gcp":
+        if project_marker.exists():
+            previous_project = project_marker.read_text().strip()
+            if previous_project and previous_project != project_id:
+                typer.secho(
+                    f" Workspace '{workspace_name}' was previously deployed to project "
+                    f"'{previous_project}'. Config now points at '{project_id}'.",
+                    fg=typer.colors.RED,
+                )
+                typer.echo("  Run `deployml destroy` first to clean up the old project,")
+                typer.echo("  or change `name:` in config.yaml to use a fresh workspace.")
+                raise typer.Exit(code=1)
+        project_marker.write_text(project_id)
+
     region = config["provider"]["region"]
+    if cloud == "gcp" and not validate_gcp_region(region, project_id):
+        typer.secho(f" Region '{region}' is not valid for GCP. Run: gcloud compute regions list", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    # ADC backs the Terraform google provider, so deploy must verify auth and ADC
+    # the way init and doctor do. Without this a logged-in user with no ADC passes
+    # the auth check and then fails opaquely at terraform apply (issue #54).
+    if cloud == "gcp":
+        _gcp_credentials_preflight_or_exit()
+
     deployment_type = config["deployment"]["type"]
     stack = config["stack"]
 
@@ -769,10 +921,11 @@ def deploy(
             connect_to_gke_cluster,
         )
         
-        # Connect to GKE cluster
-        if not connect_to_gke_cluster(project_id, cluster_name, zone, region_gke):
+        # Connect to the cluster only when we will actually apply. --generate-only
+        # renders manifests offline, so it can run before the cluster exists.
+        if not generate_only and not connect_to_gke_cluster(project_id, cluster_name, zone, region_gke):
             raise typer.Exit(code=1)
-        
+
         # Process stack and generate manifests
         mlflow_manifest_dir = None
         fastapi_manifest_dir = None
@@ -782,7 +935,11 @@ def deploy(
                 if stage_name == "experiment_tracking" and tool.get("name") == "mlflow":
                     params = tool.get("params", {})
                     image = params.get("image", f"gcr.io/{project_id}/mlflow/mlflow:latest")
-                    backend_uri = params.get("backend_store_uri", "sqlite:///mlflow.db")
+                    # Leave as None when unset so the GKE generator picks its
+                    # persistent default (sqlite on the mounted PVC). A hardcoded
+                    # sqlite:///mlflow.db here would override it with an ephemeral,
+                    # container-local store that is wiped on every pod restart.
+                    backend_uri = params.get("backend_store_uri")
                     artifact_root = params.get("artifact_root")
                     
                     mlflow_manifest_dir = manifests_dir / "mlflow"
@@ -811,6 +968,14 @@ def deploy(
                         push_image=not image.startswith("gcr.io/"),
                     )
         
+        # --generate-only stops here: manifests are rendered but not applied.
+        # The documented flow is to then apply them with `deployml gke-apply`.
+        if generate_only:
+            typer.echo("\n Manifests generated (not applied).")
+            typer.echo(f" Manifests saved to: {manifests_dir}")
+            typer.echo(f" Apply with: deployml gke-apply --config-path {config_path}")
+            return
+
         # Deploy manifests
         if mlflow_manifest_dir and mlflow_manifest_dir.exists():
             typer.echo(f"\n Deploying MLflow to GKE...")
@@ -924,6 +1089,10 @@ def deploy(
         "wandb": "wandb",
     }
     _ar_base = f"{region}-docker.pkg.dev/{project_id}/mlops-images"
+    # Tag defaults to the deployml version so deploys are reproducible.
+    # Users can pin to anything (a git SHA, a date string, a release tag) via
+    # config.provider.image_tag. Avoid :latest in production paths.
+    _image_tag = config.get("provider", {}).get("image_tag") or f"v{get_version()}"
     for stage in stack:
         for stage_name, tool in stage.items():
             tool_name = tool.get("name", "")
@@ -932,13 +1101,13 @@ def deploy(
             if not existing_image or existing_image.startswith("gcr.io/"):
                 image_name = _TOOL_IMAGE_NAMES.get(tool_name)
                 if image_name:
-                    params["image"] = f"{_ar_base}/{image_name}:latest"
-            # Cron job images are per-job and must be set explicitly — skip here
+                    params["image"] = f"{_ar_base}/{image_name}:{_image_tag}"
+            # Cron job images are per-job and must be set explicitly. Skip here.
             if stage_name == "workflow_orchestration" and tool_name == "cron":
                 for job in params.get("jobs", []):
                     if not job.get("image") or job.get("image", "").startswith("gcr.io/"):
                         job_name = job.get("service_name", "")
-                        job["image"] = f"{_ar_base}/{job_name}:latest"
+                        job["image"] = f"{_ar_base}/{job_name}:{_image_tag}"
 
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
     # PATCH: Use wandb_main.tf.j2 or mlflow_main.tf.j2 for cloud_run if present
@@ -985,8 +1154,11 @@ def deploy(
     
     if teardown_enabled:
         duration_hours = teardown_config.get("duration_hours", 24)
-        deployed_at = datetime.utcnow()
-        # Add buffer to ensure schedule is in future (will be updated to exact time after deployment)
+        # Use timezone-aware UTC. datetime.utcnow() returns a naive datetime,
+        # and .timestamp() on a naive datetime treats it as local time,
+        # corrupting the schedule by the local TZ offset.
+        from datetime import timezone as _tz
+        deployed_at = datetime.now(_tz.utc)
         teardown_at = deployed_at + timedelta(hours=duration_hours, minutes=10)
         teardown_scheduled_timestamp = int(teardown_at.timestamp())
         teardown_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
@@ -1045,33 +1217,33 @@ def deploy(
     (DEPLOYML_TERRAFORM_DIR / "variables.tf").write_text(variables_tf)
     (DEPLOYML_TERRAFORM_DIR / "terraform.tfvars").write_text(tfvars_content)
 
-    # Deploy
-    typer.echo(f" Deploying {config['name']} to {cloud}...")
+    # Deploy. Falls back to workspace_name when config has no top-level 'name'.
+    # Auth and ADC were already preflighted above, so just point gcloud at the project.
+    typer.echo(f" Deploying {config.get('name', workspace_name)} to {cloud}...")
 
-    if not check_gcp_auth():
-        typer.echo(" Authenticating with GCP...")
-        subprocess.run(
-            ["gcloud", "auth", "application-default", "login"],
-            cwd=DEPLOYML_TERRAFORM_DIR,
-        )
-
-    subprocess.run(
-        ["gcloud", "config", "set", "project", project_id],
+    run_tool(
+        "gcloud", ["config", "set", "project", project_id],
         cwd=DEPLOYML_TERRAFORM_DIR,
     )
 
     typer.echo(" Initializing Terraform...")
-    # Suppress output of terraform init
-    subprocess.run(
-        ["terraform", "init"],
+    # Capture stderr so init failures (state lock, missing ADC, bucket perms)
+    # surface a real message instead of a silent exit.
+    init_proc = run_tool(
+        "terraform", ["init"],
         cwd=DEPLOYML_TERRAFORM_DIR,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
     )
+    if init_proc.returncode != 0:
+        typer.secho(" Terraform init failed.", fg=typer.colors.RED)
+        if init_proc.stderr.strip():
+            typer.echo(init_proc.stderr.strip())
+        raise typer.Exit(code=1)
 
     typer.echo(" Planning deployment...")
-    result = subprocess.run(
-        ["terraform", "plan"],
+    result = run_tool(
+        "terraform", ["plan"],
         cwd=DEPLOYML_TERRAFORM_DIR,
         capture_output=True,
         text=True,
@@ -1148,13 +1320,18 @@ def deploy(
     if yes or typer.confirm(confirmation_msg):
         estimated_time = estimate_terraform_time(result.stdout, "apply")
         typer.echo(f" Applying changes... (Estimated time: {estimated_time})")
-        # Suppress output of terraform init
-        subprocess.run(
-            ["terraform", "init"],
+        # Re-init before apply; capture stderr to surface failures
+        init_proc2 = run_tool(
+            "terraform", ["init"],
             cwd=DEPLOYML_TERRAFORM_DIR,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
         )
+        if init_proc2.returncode != 0:
+            typer.secho(" Terraform init failed before apply.", fg=typer.colors.RED)
+            if init_proc2.stderr.strip():
+                typer.echo(init_proc2.stderr.strip())
+            raise typer.Exit(code=1)
         # Parse estimated minutes from string (e.g., '~20 minutes ...')
         import re as _re
 
@@ -1195,11 +1372,11 @@ def deploy(
             # Handle auto-teardown metadata and update scheduler schedule
             if teardown_enabled:
                 duration_hours = teardown_config.get("duration_hours", 24)
-                # Calculate teardown time AFTER deployment completes (not before)
-                deployed_at = datetime.utcnow()
+                # Timezone-aware UTC. Avoid datetime.utcnow() to keep .timestamp() correct.
+                from datetime import timezone as _tz
+                deployed_at = datetime.now(_tz.utc)
                 teardown_at = deployed_at + timedelta(hours=duration_hours)
-                
-                # Calculate the correct cron schedule based on actual deployment completion time
+
                 teardown_scheduled_timestamp = int(teardown_at.timestamp())
                 correct_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
                 time_zone = teardown_config.get("time_zone", "UTC")
@@ -1208,9 +1385,10 @@ def deploy(
                 scheduler_job_name = f"deployml-teardown-{workspace_name}"
                 try:
                     typer.echo(f" Updating teardown schedule to: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-                    update_result = subprocess.run(
+                    update_result = run_tool(
+                        "gcloud",
                         [
-                            "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
+                            "scheduler", "jobs", "update", "http", scheduler_job_name,
                             "--location", region,
                             "--schedule", correct_cron_schedule,
                             "--time-zone", time_zone,
@@ -1245,8 +1423,8 @@ def deploy(
                 typer.echo(f"   To cancel: deployml teardown cancel --config-path {config_path}")
             
             # Show all Terraform outputs in a user-friendly way
-            output_proc = subprocess.run(
-                ["terraform", "output", "-json"],
+            output_proc = run_tool(
+                "terraform", ["output", "-json"],
                 cwd=DEPLOYML_TERRAFORM_DIR,
                 capture_output=True,
                 text=True,
@@ -1343,6 +1521,9 @@ def get_urls(
     env_path: Path = typer.Option(
         Path(".env"), "--env-path", help="Path to write .env file"
     ),
+    show_secrets: bool = typer.Option(
+        False, "--show-secrets", help="Fetch and print Grafana admin password and MLflow DSN connection hint. Uses gcloud secrets versions access."
+    ),
 ):
     """
     Print service URLs from the last deployment and write them to a .env file.
@@ -1351,8 +1532,8 @@ def get_urls(
         typer.echo(f" Config file not found: {config_path}")
         raise typer.Exit(code=1)
 
-    config = yaml.safe_load(config_path.read_text())
-    workspace_name = config.get("name") or "development"
+    config = _load_config_or_exit(config_path)
+    workspace_name = config.get("name") or "default"
     project_id = config.get("provider", {}).get("project_id", "")
     terraform_dir = Path.cwd() / ".deployml" / workspace_name / "terraform"
 
@@ -1360,8 +1541,8 @@ def get_urls(
         typer.echo(f" No deployment found at {terraform_dir}. Run 'deployml deploy' first.")
         raise typer.Exit(code=1)
 
-    output_proc = subprocess.run(
-        ["terraform", "output", "-json"],
+    output_proc = run_tool(
+        "terraform", ["output", "-json"],
         cwd=terraform_dir,
         capture_output=True,
         text=True,
@@ -1417,6 +1598,33 @@ def get_urls(
     env_path.write_text("\n".join(env_lines) + "\n")
     typer.echo(f"\n .env written to {env_path.resolve()}")
 
+    if show_secrets:
+        typer.secho("\n Secrets:", fg=typer.colors.YELLOW, bold=True)
+        # Grafana admin password
+        grafana_secret = outputs.get("grafana_admin_password_secret_id", {}).get("value", "")
+        if grafana_secret and project_id:
+            fetch = run_tool(
+                "gcloud", ["secrets", "versions", "access", "latest",
+                           "--secret", grafana_secret, "--project", project_id],
+                capture_output=True, text=True,
+            )
+            if fetch.returncode == 0:
+                typer.echo(f"  grafana_admin_user: admin")
+                typer.echo(f"  grafana_admin_password: {fetch.stdout.strip()}")
+            else:
+                typer.echo(f"  grafana_admin_password: (fetch failed: {fetch.stderr.strip()})")
+        # MLflow DSN. Public IP is blocked; print the Cloud SQL Auth Proxy steps.
+        instance = outputs.get("instance_connection_name", {}).get("value", "")
+        dsn_secret = outputs.get("mlflow_dsn_secret_id", {}).get("value", "")
+        if instance and dsn_secret and project_id:
+            typer.echo("")
+            typer.echo("  To connect to MLflow Postgres from your laptop, run the Cloud SQL Auth Proxy:")
+            typer.echo(f"    cloud-sql-proxy {instance} --port=5432")
+            typer.echo("  Install the proxy if you do not have it:")
+            typer.echo("    https://cloud.google.com/sql/docs/postgres/sql-proxy#install")
+            typer.echo("  Fetch the DSN with:")
+            typer.echo(f"    gcloud secrets versions access latest --secret={dsn_secret} --project={project_id}")
+
 
 @cli.command()
 def destroy(
@@ -1440,7 +1648,7 @@ def destroy(
         typer.echo(f" Config file not found: {config_path}")
         raise typer.Exit(code=1)
 
-    config = yaml.safe_load(config_path.read_text())
+    config = _load_config_or_exit(config_path)
 
     # Determine workspace name (same logic as deploy)
     workspace_name = config.get("name") or "default"
@@ -1456,6 +1664,8 @@ def destroy(
             "Nothing to destroy - infrastructure may already be cleaned up."
         )
         return
+
+    _validate_deploy_config_or_exit(config)
 
     # Extract project info
     cloud = config["provider"]["name"]
@@ -1479,8 +1689,8 @@ def destroy(
         typer.echo(f" Destroying infrastructure...")
 
         # Set GCP project
-        subprocess.run(
-            ["gcloud", "config", "set", "project", project_id],
+        run_tool(
+            "gcloud", ["config", "set", "project", project_id],
             cwd=DEPLOYML_TERRAFORM_DIR,
         )
 
@@ -1488,30 +1698,30 @@ def destroy(
         # before attempting to destroy Cloud SQL — otherwise active connections
         # prevent database/user deletion and the destroy fails.
         region = config.get("provider", {}).get("region", "us-central1")
-        cr_result = subprocess.run(
-            ["gcloud", "run", "services", "list",
-             "--project", project_id,
-             "--region", region,
-             "--format", "value(metadata.name)"],
+        cr_result = run_tool(
+            "gcloud", ["run", "services", "list",
+                       "--project", project_id,
+                       "--region", region,
+                       "--format", "value(metadata.name)"],
             capture_output=True, text=True
         )
         if cr_result.returncode == 0:
             services = [s.strip() for s in cr_result.stdout.splitlines() if s.strip()]
             for service in services:
                 typer.echo(f" Deleting Cloud Run service: {service}")
-                subprocess.run(
-                    ["gcloud", "run", "services", "delete", service,
-                     "--project", project_id,
-                     "--region", region,
-                     "--quiet"],
+                run_tool(
+                    "gcloud", ["run", "services", "delete", service,
+                               "--project", project_id,
+                               "--region", region,
+                               "--quiet"],
                     capture_output=True,
                 )
 
         # Remove Cloud SQL databases and user from Terraform state so Terraform
         # doesn't try to delete them individually — the instance deletion handles
         # that automatically, avoiding active-connection errors on destroy.
-        state_result = subprocess.run(
-            ["terraform", "state", "list"],
+        state_result = run_tool(
+            "terraform", ["state", "list"],
             cwd=DEPLOYML_TERRAFORM_DIR,
             capture_output=True,
             text=True,
@@ -1526,8 +1736,8 @@ def destroy(
             ]
             for resource in resources_to_remove:
                 typer.echo(f" Removing from state: {resource}")
-                subprocess.run(
-                    ["terraform", "state", "rm", resource],
+                run_tool(
+                    "terraform", ["state", "rm", resource],
                     cwd=DEPLOYML_TERRAFORM_DIR,
                     capture_output=True,
                 )
@@ -1536,19 +1746,53 @@ def destroy(
         cmd = ["terraform", "destroy", "--auto-approve"]
 
         # Run destroy
-        result = subprocess.run(cmd, cwd=DEPLOYML_TERRAFORM_DIR, check=False)
+        result = run_tool(cmd[0], cmd[1:], cwd=DEPLOYML_TERRAFORM_DIR, check=False)
 
         if result.returncode == 0:
             typer.echo(" Infrastructure destroyed successfully!")
 
+            # Clean up the Artifact Registry repo created by build-images.
+            # Terraform does not manage it, so without this it lingers and bills.
+            region = config.get("provider", {}).get("region", "us-central1")
+            ar_repo = "mlops-images"
+            typer.echo(f" Removing Artifact Registry repo {ar_repo}...")
+            run_tool(
+                "gcloud", ["artifacts", "repositories", "delete", ar_repo,
+                           "--location", region, "--project", project_id, "--quiet"],
+                capture_output=True,
+            )
+
+            # Clean up the Cloud Build staging bucket that `gcloud builds submit`
+            # auto-creates during build-images. It is not Terraform-managed and
+            # accumulates source tarballs across cycles. Best-effort; Cloud Build
+            # recreates it on the next build if needed.
+            cb_bucket = f"gs://{project_id}_cloudbuild"
+            typer.echo(f" Removing Cloud Build staging bucket {cb_bucket}...")
+            run_tool(
+                "gcloud", ["storage", "rm", "--recursive", cb_bucket, "--quiet"],
+                capture_output=True,
+            )
+
             if clean_workspace:
                 typer.echo(" Cleaning workspace...")
-                shutil.rmtree(DEPLOYML_DIR)
+                robust_rmtree(DEPLOYML_DIR)
                 typer.echo(" Workspace cleaned")
-            elif typer.confirm("Clean up Terraform state files?"):
+            elif yes or typer.confirm("Clean up Terraform state files?"):
+                # --yes propagates to the cleanup confirm so scripted runs do not hang
                 cleanup_terraform_files(DEPLOYML_TERRAFORM_DIR)
         else:
-            typer.echo(f" Destroy failed: {result.stderr}")
+            # PRESERVE state on partial failure so a re-run can reconcile.
+            typer.secho(
+                f"\n Destroy failed with exit code {result.returncode}. "
+                "Terraform state preserved at:",
+                fg=typer.colors.RED,
+            )
+            typer.echo(f"   {DEPLOYML_TERRAFORM_DIR}")
+            typer.echo("\nRecovery:")
+            typer.echo("  1. Inspect residual resources: gcloud asset search-all-resources "
+                       f"--scope=projects/{project_id}")
+            typer.echo(f"  2. Re-run: deployml destroy --yes")
+            typer.echo(f"  3. Or delete the whole project: gcloud projects delete {project_id}")
             raise typer.Exit(code=1)
 
     except Exception as e:
@@ -1557,18 +1801,57 @@ def destroy(
 
 
 @cli.command()
-def status():
+def status(
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config-path", "-c", help="Path to YAML config file"
+    ),
+):
     """
-    Check the deployment status of the current workspace.
+    Show the current workspace, whether a deployment exists, and the latest service URLs.
     """
-    typer.echo("Checking deployment status...")
+    if not config_path.exists():
+        typer.echo(f" Config file not found: {config_path}")
+        raise typer.Exit(code=1)
+    config = _load_config_or_exit(config_path)
+    workspace_name = config.get("name") or "default"
+    deployml_dir = Path.cwd() / ".deployml" / workspace_name
+    tf_dir = deployml_dir / "terraform"
+    typer.echo(f"Workspace: {workspace_name}")
+    typer.echo(f"Path: {deployml_dir}")
+    if not tf_dir.exists():
+        typer.secho("Status: not deployed (no terraform workspace found)", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=0)
+    marker = deployml_dir / ".project_id"
+    if marker.exists():
+        typer.echo(f"Project: {marker.read_text().strip()}")
+    out_proc = run_tool(
+        "terraform", ["output", "-json"],
+        cwd=tf_dir, capture_output=True, text=True,
+    )
+    if out_proc.returncode == 0 and out_proc.stdout.strip():
+        try:
+            outputs = json.loads(out_proc.stdout)
+            urls = {k: v.get("value") for k, v in outputs.items() if isinstance(v.get("value"), str) and v.get("value", "").startswith("http")}
+            if urls:
+                typer.secho("Status: deployed", fg=typer.colors.GREEN)
+                for k, v in urls.items():
+                    typer.echo(f"  {k}: {v}")
+            else:
+                typer.secho("Status: workspace exists but no URL outputs found", fg=typer.colors.YELLOW)
+        except Exception:
+            typer.secho("Status: workspace exists but terraform output is not parseable", fg=typer.colors.YELLOW)
+    else:
+        typer.secho("Status: workspace exists but terraform output is empty", fg=typer.colors.YELLOW)
 
 
 @cli.command()
 def teardown(
-    action: str = typer.Argument(..., help="Action: cancel, status, or schedule"),
+    action: str = typer.Argument(..., help="Action: cancel, status, update, or schedule"),
     config_path: Path = typer.Option(
         ..., "--config-path", "-c", help="Path to YAML config file"
+    ),
+    hours: int = typer.Option(
+        24, "--hours", help="Hours until teardown. Used by schedule and update."
     ),
 ):
     """
@@ -1577,19 +1860,19 @@ def teardown(
     if not config_path.exists():
         typer.echo(f" Config file not found: {config_path}")
         raise typer.Exit(code=1)
-    
-    config = yaml.safe_load(config_path.read_text())
+
+    config = _load_config_or_exit(config_path)
     workspace_name = config.get("name") or "default"
     DEPLOYML_DIR = Path.cwd() / ".deployml" / workspace_name
-    
+
     if action == "cancel":
         cancel_teardown(config, DEPLOYML_DIR, workspace_name)
     elif action == "status":
         show_teardown_status(config, DEPLOYML_DIR, workspace_name)
     elif action == "update":
-        update_teardown_schedule(config, DEPLOYML_DIR, workspace_name)
+        update_teardown_schedule(config, DEPLOYML_DIR, workspace_name, hours)
     elif action == "schedule":
-        schedule_teardown(config, DEPLOYML_DIR, workspace_name)
+        schedule_teardown(config, DEPLOYML_DIR, workspace_name, hours)
     else:
         typer.echo(f" Unknown action: {action}. Use: cancel, status, update, or schedule")
         raise typer.Exit(code=1)
@@ -1600,11 +1883,12 @@ def cancel_teardown(config: dict, deployml_dir: Path, workspace_name: str):
     project_id = config["provider"]["project_id"]
     region = config["provider"]["region"]
     
-    # Delete Cloud Scheduler job
+    # Delete Cloud Scheduler job. Cloud Scheduler uses --location, not --region.
+    # Earlier code passed --region which gcloud rejects, so cancel silently failed.
     scheduler_job_name = f"deployml-teardown-{workspace_name}"
-    result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "delete", scheduler_job_name,
-         "--project", project_id, "--region", region, "--quiet"],
+    result = run_tool(
+        "gcloud", ["scheduler", "jobs", "delete", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--quiet"],
         capture_output=True,
         text=True,
     )
@@ -1628,9 +1912,9 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
     scheduler_job_name = f"deployml-teardown-{workspace_name}"
     
     # Query Cloud Scheduler job
-    result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
-         "--project", project_id, "--location", region, "--format", "json"],
+    result = run_tool(
+        "gcloud", ["scheduler", "jobs", "describe", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--format", "json"],
         capture_output=True,
         text=True,
     )
@@ -1718,16 +2002,16 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
     typer.echo(f"   View in Console: https://console.cloud.google.com/cloudscheduler/jobs/edit/{region}/{scheduler_job_name}?project={project_id}")
 
 
-def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: str):
+def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: str, duration_hours: int = 24):
     """Update the scheduled teardown time."""
     project_id = config["provider"]["project_id"]
     region = config["provider"]["region"]
     scheduler_job_name = f"deployml-teardown-{workspace_name}"
     
     # Check if Cloud Scheduler job exists
-    result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
-         "--project", project_id, "--location", region, "--format", "json"],
+    result = run_tool(
+        "gcloud", ["scheduler", "jobs", "describe", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--format", "json"],
         capture_output=True,
         text=True,
     )
@@ -1759,9 +2043,7 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
     except Exception:
         pass
     
-    # Get new duration
-    duration_hours = typer.prompt("Hours until new teardown time", default=24, type=int)
-    
+    # Duration is now passed in via CLI flag instead of interactive prompt.
     if duration_hours < 0:
         typer.echo(" Duration must be positive")
         raise typer.Exit(code=1)
@@ -1775,19 +2057,14 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
     new_cron_schedule = calculate_cron_from_timestamp(teardown_scheduled_timestamp)
     
     typer.echo(f"\n New Schedule: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-    
-    # Confirm update
-    confirm = typer.confirm("Update the teardown schedule?", default=True)
-    if not confirm:
-        typer.echo(" Update cancelled")
-        return
-    
+
     # Update Cloud Scheduler job
     typer.echo("\n Updating Cloud Scheduler job...")
     typer.echo(f"   Cron schedule: {new_cron_schedule}")
-    update_result = subprocess.run(
+    update_result = run_tool(
+        "gcloud",
         [
-            "gcloud", "scheduler", "jobs", "update", "http", scheduler_job_name,
+            "scheduler", "jobs", "update", "http", scheduler_job_name,
             "--location", region,
             "--schedule", new_cron_schedule,
             "--time-zone", time_zone,
@@ -1805,9 +2082,9 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
         raise typer.Exit(code=1)
     
     # Verify the update by querying the job again
-    verify_result = subprocess.run(
-        ["gcloud", "scheduler", "jobs", "describe", scheduler_job_name,
-         "--project", project_id, "--location", region, "--format", "json"],
+    verify_result = run_tool(
+        "gcloud", ["scheduler", "jobs", "describe", scheduler_job_name,
+                   "--project", project_id, "--location", region, "--format", "json"],
         capture_output=True,
         text=True,
     )
@@ -1851,10 +2128,10 @@ def update_teardown_schedule(config: dict, deployml_dir: Path, workspace_name: s
     save_deployment_metadata(deployml_dir, metadata)
 
 
-def schedule_teardown(config: dict, deployml_dir: Path, workspace_name: str):
+def schedule_teardown(config: dict, deployml_dir: Path, workspace_name: str, duration_hours: int = 24):
     """Schedule a new teardown."""
-    duration_hours = typer.prompt("Hours until teardown", default=24, type=int)
-    deployed_at = datetime.utcnow()
+    from datetime import timezone as _tz
+    deployed_at = datetime.now(_tz.utc)
     teardown_at = deployed_at + timedelta(hours=duration_hours)
     
     metadata = {
@@ -1900,12 +2177,22 @@ def init(
         if not project_id:
             typer.echo(" --project-id is required for GCP.")
             raise typer.Exit(code=1)
+        if not check_gcp_auth():
+            typer.secho(" gcloud is not authenticated. Run: gcloud auth login", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        if not check_gcp_adc():
+            typer.secho(" Application Default Credentials missing. Run: gcloud auth application-default login", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        if not validate_gcp_project(project_id):
+            typer.secho(f" Project '{project_id}' not found or not accessible by your gcloud account.", fg=typer.colors.RED)
+            typer.echo("   Verify with: gcloud projects describe " + project_id)
+            raise typer.Exit(code=1)
         typer.echo(
             f" Enabling required GCP APIs for project: {project_id} ..."
         )
-        result = subprocess.run(
+        result = run_tool(
+            "gcloud",
             [
-                "gcloud",
                 "services",
                 "enable",
                 *REQUIRED_GCP_APIS,
@@ -1949,22 +2236,50 @@ def init(
                 f"{config_path} already exists. Use --overwrite to replace."
             )
 
-        config_template = {
-            "# Run `mlops-infra generate` to create your config"
-        }
+        # Write a runnable starter config so the user can deploy immediately
+        # after build-images. Earlier code wrote a Python set literal here,
+        # which yaml.dump serialized as `!!set` and broke deploy.
+        if provider == "gcp":
+            config_template = {
+                "name": f"{provider}-mlops-stack-mlflow",
+                "provider": {
+                    "name": provider,
+                    "project_id": project_id,
+                    "region": "us-west1",
+                    "image_tag": f"v{get_version()}",
+                },
+                "deployment": {"type": "cloud_run"},
+                "stack": [
+                    {"experiment_tracking": {"name": "mlflow", "params": {"service_name": "mlflow-server"}}},
+                    {"artifact_tracking": {"name": "mlflow", "params": {"artifact_bucket": f"mlflow-artifacts-{project_id}"}}},
+                    {"model_registry": {"name": "mlflow", "params": {"backend_store_uri": "postgresql"}}},
+                    {"model_serving": {"name": "fastapi", "params": {"service_name": "fastapi-mlflow-server"}}},
+                    {"model_monitoring": {"name": "grafana", "params": {"service_name": "grafana-server"}}},
+                ],
+            }
+        else:
+            # AWS and Azure scaffolds. The full stack is not yet implemented for
+            # these providers, but the file is at least valid YAML the user can extend.
+            config_template = {
+                "name": f"{provider}-mlops-stack",
+                "provider": {"name": provider, "project_id": project_id, "region": ""},
+                "deployment": {"type": ""},
+                "stack": [],
+            }
 
         with open(config_path, "w") as f:
-            yaml.dump(config_template, f, sort_keys=False)
+            yaml.dump(config_template, f, sort_keys=False, default_flow_style=False)
 
         typer.secho("Project initialized successfully.", fg=typer.colors.GREEN)
         typer.echo()
         typer.echo("Created:")
         typer.echo("  - docker/")
-        typer.echo("  - config.yaml")
+        typer.echo(f"  - config.yaml  (runnable starter for {provider})")
         typer.echo()
         typer.echo("Next steps:")
-        typer.echo("  1. Edit config.yaml")
-        typer.echo("  2. Build images with: mlops-infra build-images --docker-root docker")
+        typer.echo("  1. Review config.yaml")
+        typer.echo("  2. deployml build-images --create-repo")
+        typer.echo("  3. deployml deploy --verbose")
 
     except Exception as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED)
@@ -2023,6 +2338,11 @@ def minikube_deploy(
         None, "--image-name", "-i",
         help="Docker image name to load into minikube (auto-detected from deployment.yaml if not provided)"
     ),
+    namespace: Optional[str] = typer.Option(
+        None, "--namespace", "-n",
+        help="Kubernetes namespace to deploy into. Defaults to the default namespace. "
+        "Use the same namespace for MLflow and FastAPI so service DNS resolves."
+    ),
 ):
     """
     Deploy FastAPI to minikube using kubectl apply.
@@ -2031,15 +2351,15 @@ def minikube_deploy(
     if not manifest_dir.exists():
         typer.echo(f"Directory not found: {manifest_dir}")
         raise typer.Exit(code=1)
-    
+
     if not check_minikube_running():
         typer.echo("Minikube is not running. Start it first:")
         typer.echo("   minikube start")
         typer.echo("   OR")
         typer.echo("   deployml minikube-init --start-cluster")
         raise typer.Exit(code=1)
-    
-    success = deploy_fastapi_to_minikube(manifest_dir, image_name=image_name)
+
+    success = deploy_fastapi_to_minikube(manifest_dir, image_name=image_name, namespace=namespace)
     
     if not success:
         raise typer.Exit(code=1)
@@ -2054,7 +2374,7 @@ def mlflow_init(
         ..., "--image", "-i", help="MLflow Docker image"
     ),
     backend_store_uri: Optional[str] = typer.Option(
-        None, "--backend-store-uri", "-b", help="Backend store URI (defaults to SQLite)"
+        None, "--backend-store-uri", "-b", help="Backend store URI. Default sqlite on the mounted PVC."
     ),
     artifact_root: Optional[str] = typer.Option(
         None, "--artifact-root", "-a", help="Artifact root path (defaults to /mlflow-artifacts)"
@@ -2063,10 +2383,18 @@ def mlflow_init(
         True, "--start-cluster/--no-start-cluster",
         help="Start minikube cluster if not running"
     ),
+    persistent_storage: bool = typer.Option(
+        True, "--persistent-storage/--ephemeral-storage",
+        help="Mount a PersistentVolumeClaim so sqlite and artifacts survive pod restarts. Default on."
+    ),
+    pvc_size: str = typer.Option(
+        "5Gi", "--pvc-size", help="PVC size when --persistent-storage is on."
+    ),
 ):
     """
     Initialize minikube and generate MLflow Kubernetes manifests.
-    Creates deployment.yaml and service.yaml in the specified directory.
+    Creates deployment.yaml, service.yaml, and (when --persistent-storage)
+    pvc.yaml in the specified directory.
     """
     if not check_minikube_running():
         if start_cluster:
@@ -2083,7 +2411,9 @@ def mlflow_init(
         output_dir=output_dir,
         image=image,
         backend_store_uri=backend_store_uri,
-        artifact_root=artifact_root
+        artifact_root=artifact_root,
+        use_pvc=persistent_storage,
+        pvc_size=pvc_size,
     )
     
     typer.echo("\nSetup complete! Next steps:")
@@ -2101,6 +2431,11 @@ def mlflow_deploy(
         None, "--image-name", "-i",
         help="Docker image name to load into minikube (auto-detected from deployment.yaml if not provided)"
     ),
+    namespace: Optional[str] = typer.Option(
+        None, "--namespace", "-n",
+        help="Kubernetes namespace to deploy into. Defaults to the default namespace. "
+        "Use the same namespace for MLflow and FastAPI so service DNS resolves."
+    ),
 ):
     """
     Deploy MLflow to minikube using kubectl apply.
@@ -2109,15 +2444,15 @@ def mlflow_deploy(
     if not manifest_dir.exists():
         typer.echo(f"Directory not found: {manifest_dir}")
         raise typer.Exit(code=1)
-    
+
     if not check_minikube_running():
         typer.echo("Minikube is not running. Start it first:")
         typer.echo("   minikube start")
         typer.echo("   OR")
         typer.echo("   deployml mlflow-init --start-cluster")
         raise typer.Exit(code=1)
-    
-    success = deploy_mlflow_to_minikube(manifest_dir, image_name=image_name)
+
+    success = deploy_mlflow_to_minikube(manifest_dir, image_name=image_name, namespace=namespace)
     
     if not success:
         raise typer.Exit(code=1)
@@ -2141,6 +2476,11 @@ def gke_deploy(
     region: Optional[str] = typer.Option(
         None, "--region", "-r", help="GKE cluster region"
     ),
+    namespace: Optional[str] = typer.Option(
+        None, "--namespace", "-n",
+        help="Kubernetes namespace to deploy into. Defaults to the default namespace. "
+        "Use the same namespace for MLflow and FastAPI so service DNS resolves."
+    ),
 ):
     """
     Deploy Kubernetes manifests to GKE cluster.
@@ -2149,21 +2489,208 @@ def gke_deploy(
     if not manifest_dir.exists():
         typer.echo(f"Directory not found: {manifest_dir}")
         raise typer.Exit(code=1)
-    
+
     if not zone and not region:
         typer.echo("Either --zone or --region must be provided")
         raise typer.Exit(code=1)
-    
+
     success = deploy_to_gke(
         manifest_dir=manifest_dir,
         cluster_name=cluster,
         project_id=project,
         zone=zone,
         region=region,
+        namespace=namespace,
     )
-    
+
     if not success:
         raise typer.Exit(code=1)
+
+
+@cli.command("gke-cluster-create")
+def gke_cluster_create(
+    cluster: str = typer.Option(..., "--cluster", "-c", help="Cluster name"),
+    project: str = typer.Option(..., "--project", "-p", help="GCP project ID"),
+    region: str = typer.Option("us-west1", "--region", "-r", help="Region for the cluster"),
+    autopilot: bool = typer.Option(
+        True, "--autopilot/--standard",
+        help="Use GKE Autopilot (default) or a standard zonal cluster.",
+    ),
+):
+    """
+    Create a GKE cluster. Thin wrapper around `gcloud container clusters create`.
+    Autopilot is the default and the cheapest path for occasional testing.
+    """
+    if autopilot:
+        cmd = [
+            "gcloud", "container", "clusters", "create-auto", cluster,
+            "--region", region, "--project", project,
+        ]
+    else:
+        cmd = [
+            "gcloud", "container", "clusters", "create", cluster,
+            "--region", region, "--project", project,
+            "--num-nodes", "1", "--machine-type", "e2-medium",
+        ]
+    typer.echo(f" Creating {'Autopilot' if autopilot else 'standard'} cluster {cluster}...")
+    typer.echo("   This typically takes 5 to 10 minutes.")
+    result = run_tool(cmd[0], cmd[1:], capture_output=False, text=True)
+    if result.returncode != 0:
+        raise typer.Exit(code=1)
+    typer.secho(f" Cluster {cluster} created.", fg=typer.colors.GREEN)
+    typer.echo(f"   Next: deployml gke-init --output-dir manifests --image gcr.io/{project}/... --project {project}")
+
+
+@cli.command("gke-destroy")
+def gke_destroy(
+    manifest_dir: Path = typer.Option(
+        ..., "--manifest-dir", "-d",
+        help="Directory containing deployment.yaml and service.yaml that were applied"
+    ),
+    cluster: str = typer.Option(
+        ..., "--cluster", "-c", help="GKE cluster name"
+    ),
+    project: str = typer.Option(
+        ..., "--project", "-p", help="GCP project ID"
+    ),
+    zone: Optional[str] = typer.Option(
+        None, "--zone", "-z", help="GKE cluster zone"
+    ),
+    region: Optional[str] = typer.Option(
+        None, "--region", "-r", help="GKE cluster region"
+    ),
+    namespace: Optional[str] = typer.Option(
+        None, "--namespace", "-n",
+        help="Namespace the manifests were applied to. Defaults to the default namespace."
+    ),
+    delete_cluster: bool = typer.Option(
+        False, "--delete-cluster",
+        help="Also delete the GKE cluster after removing manifests."
+    ),
+    keep_images: bool = typer.Option(
+        False, "--keep-images",
+        help="Keep the gcr.io image this workload used. By default it is deleted so "
+        "teardown is fully self-cleaning, matching the Cloud Run destroy behavior."
+    ),
+):
+    """
+    Remove deployml-managed manifests from a GKE cluster. Optionally delete the cluster.
+
+    Mirrors the Cloud Run `destroy` command for the GKE flow. Without `--delete-cluster`,
+    only the deployed Deployments and Services are removed; the cluster stays up. By
+    default the gcr.io image referenced by the deployment is also deleted; pass
+    --keep-images to keep it for a quick redeploy.
+    """
+    if not manifest_dir.exists():
+        typer.echo(f"Directory not found: {manifest_dir}")
+        raise typer.Exit(code=1)
+
+    if not zone and not region:
+        typer.echo("Either --zone or --region must be provided")
+        raise typer.Exit(code=1)
+
+    from deployml.utils.kubernetes_gke import (
+        connect_to_gke_cluster,
+        get_pvc_volume_handle,
+        disk_ref_from_volume_handle,
+        delete_gce_disk_if_exists,
+    )
+
+    if not connect_to_gke_cluster(project, cluster, zone, region):
+        raise typer.Exit(code=1)
+
+    # Capture the PVC's backing PersistentDisk BEFORE teardown. With
+    # --delete-cluster the in-cluster CSI driver can be removed before it finishes
+    # reclaiming the PD asynchronously, which orphans a billing disk (concern C12).
+    # We capture only the disk our own PVC created, then guarantee its removal
+    # after the cluster is gone.
+    pvc_disk_ref = None
+    if delete_cluster:
+        pvc_manifest = manifest_dir / "pvc.yaml"
+        if pvc_manifest.exists():
+            try:
+                pvc_name = yaml.safe_load(pvc_manifest.read_text())["metadata"]["name"]
+                handle = get_pvc_volume_handle(pvc_name, namespace)
+                pvc_disk_ref = disk_ref_from_volume_handle(handle) if handle else None
+            except Exception:
+                pvc_disk_ref = None
+
+    # Delete in reverse order: service, then deployment, then PVC last. The PVC
+    # is deleted explicitly because its backing PersistentDisk bills even after
+    # the workload is gone (GKE's default storageclass reclaims on PVC delete).
+    ns = ["-n", namespace] if namespace and namespace != "default" else []
+    for fname in ["service.yaml", "deployment.yaml", "pvc.yaml"]:
+        f = manifest_dir / fname
+        if f.exists():
+            typer.echo(f" Deleting {fname}...")
+            result = run_tool(
+                "kubectl", ["delete", "-f", str(f), "--ignore-not-found"] + ns,
+                capture_output=True, text=True,
+            )
+            if result.returncode == 0:
+                typer.echo(f"   {result.stdout.strip() or 'deleted'}")
+            else:
+                typer.secho(f"   {result.stderr.strip()}", fg=typer.colors.YELLOW)
+
+    # Remove the gcr.io image this workload referenced so it does not linger and
+    # bill, mirroring the Cloud Run destroy that removes the Artifact Registry repo.
+    # Best-effort; --keep-images opts out for iterative redeploys.
+    if not keep_images:
+        dep = manifest_dir / "deployment.yaml"
+        image = ""
+        if dep.exists():
+            try:
+                doc = yaml.safe_load(dep.read_text())
+                image = doc["spec"]["template"]["spec"]["containers"][0].get("image", "")
+            except Exception:
+                image = ""
+        if image.startswith("gcr.io/"):
+            typer.echo(f" Removing image {image}...")
+            run_tool(
+                "gcloud", ["container", "images", "delete", image,
+                           "--force-delete-tags", "--quiet", "--project", project],
+                capture_output=True,
+            )
+
+    if delete_cluster:
+        typer.echo(f"\n Deleting cluster {cluster}...")
+        cmd = ["gcloud", "container", "clusters", "delete", cluster,
+               "--project", project, "--quiet"]
+        if zone:
+            cmd += ["--zone", zone]
+        else:
+            cmd += ["--region", region]
+        # Deleting the Services above starts LoadBalancer teardown operations.
+        # GKE refuses a cluster delete while one is in flight with a 400
+        # "incompatible operation", which would otherwise leave the cluster
+        # billing. Retry until the in-flight operation clears.
+        loc = zone or region
+        for attempt in range(6):
+            result = run_tool(cmd[0], cmd[1:], capture_output=True, text=True)
+            if result.returncode == 0:
+                typer.echo(f" Cluster {cluster} deleted")
+                # The cluster is gone, so the CSI driver can no longer reclaim the
+                # PVC's PersistentDisk. Guarantee that one disk is removed. No-op
+                # if the driver already reclaimed it before the cluster delete.
+                if pvc_disk_ref:
+                    delete_gce_disk_if_exists(project, pvc_disk_ref)
+                break
+            if "incompatible operation" in (result.stderr or "").lower():
+                typer.echo("   Cluster busy with another operation, retrying in 20s...")
+                time.sleep(20)
+                continue
+            typer.secho(f" Cluster delete failed: {result.stderr}", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        else:
+            typer.secho(
+                f" Cluster delete still blocked after retries. Re-run: "
+                f"gcloud container clusters delete {cluster} --location {loc} "
+                f"--project {project} --quiet",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+    else:
+        typer.echo("\n Cluster left running. Pass --delete-cluster to also remove it.")
 
 
 @cli.command()
@@ -2178,15 +2705,21 @@ def gke_init(
         ..., "--project", "-p", help="GCP project ID"
     ),
     service: str = typer.Option(
-        "mlflow", "--service", "-s", help="Service type: mlflow or fastapi"
+        "mlflow", "--service", "-s", help="Service type: mlflow, fastapi, or all"
     ),
     mlflow_uri: Optional[str] = typer.Option(
-        None, "--mlflow-uri", "-m", help="MLflow URI (for FastAPI)"
+        None, "--mlflow-uri", "-m", help="MLflow URI (for FastAPI). Only used when service is fastapi."
+    ),
+    mlflow_image: Optional[str] = typer.Option(
+        None, "--mlflow-image", help="MLflow image. Required when --service all. Defaults to --image when not provided."
     ),
 ):
     """
     Generate Kubernetes manifests for GKE.
-    Simple command: specify image, project, and service type.
+
+    With --service mlflow or --service fastapi, renders one set of manifests in
+    output_dir. With --service all, renders mlflow into output_dir/mlflow and
+    fastapi into output_dir/fastapi so you can deploy both halves of the stack.
     """
     if service == "mlflow":
         generate_mlflow_manifests_gke(
@@ -2205,8 +2738,30 @@ def gke_init(
             push_image=not image.startswith("gcr.io/"),
         )
         typer.echo(f"\nNext: deployml gke-deploy -d {output_dir} -c CLUSTER -p {project} -z ZONE")
+    elif service == "all":
+        ml_img = mlflow_image or image
+        ml_dir = output_dir / "mlflow"
+        fa_dir = output_dir / "fastapi"
+        generate_mlflow_manifests_gke(
+            output_dir=ml_dir,
+            image=ml_img,
+            project_id=project,
+            push_image=not ml_img.startswith("gcr.io/"),
+        )
+        # FastAPI will reach MLflow via the in-cluster service DNS.
+        in_cluster_mlflow = mlflow_uri or "http://mlflow-service:5000"
+        generate_fastapi_manifests_gke(
+            output_dir=fa_dir,
+            image=image,
+            project_id=project,
+            mlflow_tracking_uri=in_cluster_mlflow,
+            push_image=not image.startswith("gcr.io/"),
+        )
+        typer.echo("\nNext steps:")
+        typer.echo(f"  1. deployml gke-deploy -d {ml_dir} -c CLUSTER -p {project} -r REGION")
+        typer.echo(f"  2. deployml gke-deploy -d {fa_dir} -c CLUSTER -p {project} -r REGION")
     else:
-        typer.echo(f"Unknown service: {service}. Use 'mlflow' or 'fastapi'")
+        typer.echo(f"Unknown service: {service}. Use 'mlflow', 'fastapi', or 'all'")
         raise typer.Exit(code=1)
 
 
@@ -2227,7 +2782,7 @@ def gke_apply(
         typer.echo(f"Config file not found: {config_path}")
         raise typer.Exit(code=1)
 
-    config = yaml.safe_load(config_path.read_text())
+    config = _load_config_or_exit(config_path)
     
     # Validate deployment type
     deployment_type = config.get("deployment", {}).get("type")
@@ -2235,7 +2790,7 @@ def gke_apply(
         typer.echo(f"This command is only for GKE deployments. Found: {deployment_type}")
         raise typer.Exit(code=1)
     
-    workspace_name = config.get("name") or "development"
+    workspace_name = config.get("name") or "default"
     DEPLOYML_DIR = Path.cwd() / ".deployml" / workspace_name
     manifests_dir = DEPLOYML_DIR / "manifests"
     
@@ -2250,7 +2805,9 @@ def gke_apply(
     cluster_name = gke_config.get("cluster_name")
     zone = gke_config.get("zone")
     region_gke = gke_config.get("region")
-    
+    # Optional namespace; MLflow and FastAPI share it so service DNS resolves.
+    gke_namespace = gke_config.get("namespace")
+
     if not cluster_name:
         typer.echo("GKE cluster_name must be specified in config.gke.cluster_name")
         raise typer.Exit(code=1)
@@ -2294,11 +2851,12 @@ def gke_apply(
             project_id=project_id,
             zone=zone,
             region=region_gke,
+            namespace=gke_namespace,
         ):
             deployed_any = True
         else:
             raise typer.Exit(code=1)
-    
+
     if fastapi_manifest_dir.exists():
         typer.echo(f"\n Deploying FastAPI to GKE...")
         if deploy_to_gke(
@@ -2307,11 +2865,12 @@ def gke_apply(
             project_id=project_id,
             zone=zone,
             region=region_gke,
+            namespace=gke_namespace,
         ):
             deployed_any = True
         else:
             raise typer.Exit(code=1)
-    
+
     if deployed_any:
         typer.echo("\n GKE deployment complete!")
     else:
@@ -2349,11 +2908,11 @@ def build_images_command(
         "--repository",
         help="Artifact Registry repository name.",
     ),
-    tag: str = typer.Option(
-        "latest",
+    tag: Optional[str] = typer.Option(
+        None,
         "--tag",
         "-t",
-        help="Image tag to apply.",
+        help="Image tag to apply. Defaults to config.provider.image_tag or v{deployml_version}.",
     ),
     create_repo: bool = typer.Option(
         False,
@@ -2364,6 +2923,12 @@ def build_images_command(
         False,
         "--dry-run",
         help="Show what would be built without executing Docker or gcloud commands.",
+    ),
+    platform: Optional[str] = typer.Option(
+        None,
+        "--platform",
+        help="Local build platform. Defaults to host arch so images run on a local "
+        "minikube node. Pass linux/amd64 only for a manual amd64 push. Ignored in GCP mode.",
     ),
 ):
     """
@@ -2379,14 +2944,18 @@ def build_images_command(
     """
 
     if config_path and config_path.exists():
-        config = yaml.safe_load(config_path.read_text())
+        config = _load_config_or_exit(config_path)
         if not gcp_project:
             gcp_project = config.get("provider", {}).get("project_id")
         if not region:
             region = config.get("provider", {}).get("region", "us-central1")
+        if not tag:
+            tag = config.get("provider", {}).get("image_tag")
 
     if not region:
         region = "us-central1"
+    if not tag:
+        tag = f"v{get_version()}"
 
     if create_repo and not gcp_project:
         typer.secho(
@@ -2408,6 +2977,7 @@ def build_images_command(
             tag=tag,
             create_repo=create_repo,
             dry_run=dry_run,
+            platform=platform,
         )
 
         if not dry_run:
@@ -2421,6 +2991,10 @@ def main():
     """
     Entry point for the DeployML CLI.
     """
+    # Force UTF-8 on the Windows console first so any emoji or box glyph in command
+    # output cannot raise UnicodeEncodeError on a legacy cp1252 console. No-op off
+    # Windows.
+    configure_console_encoding()
     cli()
 
 

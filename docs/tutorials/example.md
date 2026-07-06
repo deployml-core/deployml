@@ -20,7 +20,7 @@ All scripts read from the `.env` file written by `deployml get-urls`. It should 
 MLFLOW_URL=https://...
 FASTAPI_URL=https://...
 GRAFANA_URL=https://...
-BIGQUERY_PROJECT=your-project-id
+BIGQUERY_PROJECT=YOUR_GCP_PROJECT_ID
 BIGQUERY_DATASET=mlops
 ```
 
@@ -38,7 +38,7 @@ Generates 500 rows of synthetic housing data and loads them into the `offline_fe
 
 Verify:
 ```bash
-bq query --use_legacy_sql=false 'SELECT COUNT(*) FROM `YOUR_PROJECT.mlops.offline_features`'
+bq query --use_legacy_sql=false 'SELECT COUNT(*) FROM `$BIGQUERY_PROJECT.mlops.offline_features`'
 ```
 
 ### Step 2 — Train a model with MLflow
@@ -71,7 +71,7 @@ Pulls 50 rows from `offline_features` and sends each to FastAPI `/predict`. Fast
 
 Verify:
 ```bash
-bq query --use_legacy_sql=false 'SELECT COUNT(*) FROM `YOUR_PROJECT.mlops.predictions`'
+bq query --use_legacy_sql=false 'SELECT COUNT(*) FROM `$BIGQUERY_PROJECT.mlops.predictions`'
 ```
 
 Also check FastAPI is serving the model:
