@@ -87,7 +87,8 @@ class DeployMLDoctor:
         # Development tools
         self._check_git()
         self._check_infracost()
-        
+        self._check_infracost_authenticated()
+
         # Permissions and access
         self._check_docker_permissions()
         self._check_cloud_authentication()
@@ -388,7 +389,28 @@ class DeployMLDoctor:
                 message="Installed but version check failed",
                 required=False
             ))
-    
+
+    def _check_infracost_authenticated(self):
+        """Check if infracost is authenticated via credentials file or API key env var"""
+        if not shutil.which("infracost"):
+            return  # _check_infracost already reported not-installed
+        from deployml.utils.infracost import check_infracost_authenticated
+        if check_infracost_authenticated():
+            self._add_result(CheckResult(
+                name="Infracost Auth",
+                status=CheckStatus.PASS,
+                message="Infracost is authenticated",
+                required=False
+            ))
+        else:
+            self._add_result(CheckResult(
+                name="Infracost Auth",
+                status=CheckStatus.WARNING,
+                message="Infracost not authenticated — cost analysis will be skipped",
+                fix_command="infracost auth login  OR  export INFRACOST_API_KEY=<key>",
+                required=False
+            ))
+
     def _check_docker_permissions(self):
         """Check Docker permissions"""
         try:
