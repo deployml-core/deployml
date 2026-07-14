@@ -18,6 +18,25 @@ You can help improve the project in several ways:
 2. Follow the setup instructions in the main README to install dependencies and configure your environment.  
 3. Create a new branch for your work with a descriptive name (e.g., fix-deployment-logging or add-example-yaml).
 
+## Development
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management, building, and publishing.
+
+- Install dependencies (including the `dev` group): `uv sync`
+- Run the tests: `uv run pytest`
+- Build the package locally: `uv build`
+
+## Releases and Commit Messages
+
+Releases are fully automated with [python-semantic-release](https://python-semantic-release.readthedocs.io/). The next version, changelog, git tag, GitHub Release, and PyPI upload are all derived from commit messages on `main`, so **do not bump the version by hand**.
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) so the version bump is correct:
+
+- `fix:` → patch release (e.g. `0.1.0` → `0.1.1`)
+- `feat:` → minor release (e.g. `0.1.0` → `0.2.0`)
+- `feat!:` or a `BREAKING CHANGE:` footer → major release
+- `docs:`, `chore:`, `refactor:`, `test:`, etc. → no release on their own
+
 ## Submitting a Pull Request
 
 1. Push your changes to your fork.  

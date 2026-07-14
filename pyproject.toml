@@ -1,7 +1,7 @@
 
 [project]
 name = "deployml-core"
-version = "0.0.42"
+version = "0.0.60"
 description = "Infra for academia"
 authors = [
     {name = "Drew Hoang", email = "codentell@gmail.com"},
@@ -27,17 +27,41 @@ dependencies = [
 [project.scripts]
 deployml = "deployml.cli.cli:main"
 
-[tool.poetry]
-packages = [{include = "deployml", from = "src"}]
+[build-system]
+requires = ["uv_build>=0.8,<0.9"]
+build-backend = "uv_build"
 
-[tool.setuptools]
-include-package-data = true
-
-[tool.setuptools.package-data]
-mlops_infra = [
-  "docker/**"
+[tool.uv.build-backend]
+# Distribution is "deployml-core" but the import package is "deployml".
+module-root = "src"
+module-name = "deployml"
+# Keep local Terraform artifacts out of the sdist/wheel (they are gitignored but
+# uv_build packages the working tree, not just tracked files).
+source-exclude = [
+    "**/.terraform",
+    "**/.terraform/**",
+    "**/.terraform.lock.hcl",
+    "**/*.tfstate",
+    "**/*.tfstate.backup",
 ]
 
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "python-semantic-release>=10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+allow_zero_version = true
+build_command = """
+uv lock --upgrade-package "$PACKAGE_NAME"
+git add uv.lock
+uv build
+"""
+
+[tool.semantic_release.branches.main]
+match = "main"
