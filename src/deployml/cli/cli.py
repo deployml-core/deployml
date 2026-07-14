@@ -43,6 +43,7 @@ from deployml.utils.infracost import (
     check_infracost_available,
     check_infracost_authenticated,
     run_infracost_analysis,
+    run_estimate_analysis,
     format_cost_for_confirmation,
 )
 from deployml.utils.teardown import (
@@ -791,11 +792,20 @@ def estimate(
     config_path: Path = typer.Option(
         Path("config.yaml"), "--config-path", "-c", help="Path to YAML config file"
     ),
+    profile: str = typer.Option(
+        "light", "--profile", "-p",
+        help="Usage profile for the estimate: 'light' (typical student demo) or 'heavy'.",
+    ),
 ):
     """Estimate monthly infrastructure cost without deploying anything."""
     import tempfile
     import shutil as _shutil
     import hashlib as _hashlib
+
+    profile = profile.lower()
+    if profile not in ("light", "heavy"):
+        typer.echo(f" Unknown profile '{profile}'. Use 'light' or 'heavy'.")
+        raise typer.Exit(code=1)
 
     if not check_infracost_available():
         typer.echo(" Infracost is not installed.")
@@ -938,7 +948,9 @@ def estimate(
         (temp_dir / "terraform.tfvars").write_text(tfvars_content)
 
         typer.echo(f" Estimating cost for: {workspace_name}")
-        analysis = run_infracost_analysis(temp_dir, warning_threshold, show_resources=True)
+        analysis = run_estimate_analysis(
+            temp_dir, profile_name=profile, warning_threshold=warning_threshold
+        )
 
         if analysis is None:
             typer.secho(" Cost estimate unavailable.", fg=typer.colors.YELLOW)

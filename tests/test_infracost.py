@@ -7,18 +7,28 @@ Covers:
   4. format_cost_for_confirmation — pure function
 """
 
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch, patch as _patch
+from unittest.mock import patch
+
+import yaml
 
 from deployml.utils.infracost import (
     CostAnalysis,
+    ResourceCost,
+    _classify_category,
+    _row_to_resource_cost,
     check_infracost_available,
     check_infracost_authenticated,
+    display_estimate,
+    fetch_resource_costs,
+    fetch_resource_costs_detailed,
     format_cost_for_confirmation,
     parse_infracost_scan_data,
 )
+from deployml.utils.usage_profiles import LIGHT, render_usage_yaml
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +165,39 @@ def test_parse_infracost_scan_data_handles_zero_cost():
 
 
 # ---------------------------------------------------------------------------
+# fetch_resource_costs  (argv construction + row parsing)
+# ---------------------------------------------------------------------------
+
+def test_fetch_resource_costs_passes_file_flag_to_inspect(tmp_path):
+    # Guards against regressing to the global-cache form of `infracost inspect`:
+    # inspect must be pinned to the scan JSON we pass, via --file.
+    scan_json = tmp_path / "infracost-scan.json"
+    scan_json.write_text("{}")
+    with patch("deployml.utils.infracost.subprocess.run") as mock_run:
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="[]", stderr="")
+        fetch_resource_costs(scan_json)
+        argv = mock_run.call_args[0][0]
+    assert argv[:2] == ["infracost", "inspect"]
+    assert "--file" in argv
+    assert argv[argv.index("--file") + 1] == str(scan_json)
+
+
+def test_fetch_resource_costs_accumulates_duplicate_resource_types(tmp_path):
+    # Two Cloud Run services should collapse into one row with summed cost.
+    rows = [
+        {"cost": "5.00", "columns": {"resource": "module.a.google_cloud_run_v2_service.x"}},
+        {"cost": "3.00", "columns": {"resource": "module.b.google_cloud_run_v2_service.y"}},
+        {"cost": "0", "columns": {"resource": "module.c.google_storage_bucket.z"}},
+    ]
+    with patch("deployml.utils.infracost.subprocess.run") as mock_run:
+        mock_run.return_value = SimpleNamespace(
+            returncode=0, stdout=json.dumps(rows), stderr=""
+        )
+        result = fetch_resource_costs(tmp_path / "scan.json")
+    assert result == [("Cloud Run", 8.0)]  # zero-cost bucket dropped
+
+
+# ---------------------------------------------------------------------------
 # format_cost_for_confirmation  (pure function)
 # ---------------------------------------------------------------------------
 
@@ -167,3 +210,97 @@ def test_format_cost_for_confirmation_nonzero_cost():
 def test_format_cost_for_confirmation_zero_cost():
     result = format_cost_for_confirmation(0.0, "USD")
     assert "Variable" in result or "usage-based" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# usage profiles  (render_usage_yaml)
+# ---------------------------------------------------------------------------
+
+def test_render_usage_yaml_is_valid_and_has_profile_keys():
+    text = render_usage_yaml(LIGHT)
+    data = yaml.safe_load(text)  # must parse as valid YAML
+    assert data["version"] == 0.1
+    defaults = data["resource_type_default_usage"]
+    assert "google_cloud_run_service" in defaults
+    assert defaults["google_bigquery_dataset"]["monthly_queries_tb"] == 0.05
+
+
+# ---------------------------------------------------------------------------
+# classification  (_classify_category / _row_to_resource_cost)
+# ---------------------------------------------------------------------------
+
+def test_classify_category_fixed_vs_usage():
+    assert _classify_category("google_sql_database_instance") == "fixed"
+    for usage_type in (
+        "google_cloud_run_service",
+        "google_bigquery_dataset",
+        "google_storage_bucket",
+    ):
+        assert _classify_category(usage_type) == "usage"
+
+
+def test_row_to_resource_cost_maps_and_labels():
+    row = {
+        "cost": "34.55",
+        "columns": {"resource": "module.cloud_sql_postgres.google_sql_database_instance.postgres"},
+    }
+    rc = _row_to_resource_cost(row)
+    assert rc.resource_type == "google_sql_database_instance"
+    assert rc.category == "fixed"
+    assert rc.label == "Cloud SQL"
+    assert rc.description == "MLflow's backend database"  # module-specific wins
+    assert abs(rc.monthly_cost - 34.55) < 0.001
+
+
+# ---------------------------------------------------------------------------
+# fetch_resource_costs_detailed  (filter zero + sort + classify)
+# ---------------------------------------------------------------------------
+
+def test_fetch_resource_costs_detailed_filters_zero_and_sorts(tmp_path):
+    rows = [
+        {"cost": "0.08", "columns": {"resource": "module.model_serving_fastapi[0].google_cloud_run_service.fastapi"}},
+        {"cost": "34.55", "columns": {"resource": "module.cloud_sql_postgres.google_sql_database_instance.pg"}},
+        {"cost": "0", "columns": {"resource": "module.bigquery.google_bigquery_table.predictions"}},
+    ]
+    with patch("deployml.utils.infracost._run_inspect_rows", return_value=rows):
+        result = fetch_resource_costs_detailed(tmp_path / "scan.json")
+    # zero-cost row dropped, remaining sorted by cost descending
+    assert [round(r.monthly_cost, 2) for r in result] == [34.55, 0.08]
+    assert result[0].category == "fixed"
+    assert result[1].category == "usage"
+    assert result[1].description == "FastAPI model server"
+
+
+# ---------------------------------------------------------------------------
+# display_estimate  (lever logic — capture printed output)
+# ---------------------------------------------------------------------------
+
+def _rc(addr, rtype, cost, category, label, desc):
+    return ResourceCost(addr, rtype, cost, category, label, desc)
+
+
+def test_display_estimate_fires_lever_when_fixed_dominates(capsys):
+    resources = [
+        _rc("module.cloud_sql_postgres.google_sql_database_instance.pg",
+            "google_sql_database_instance", 34.55, "fixed", "Cloud SQL", "MLflow's backend database"),
+        _rc("module.bigquery.google_bigquery_dataset.mlops",
+            "google_bigquery_dataset", 0.31, "usage", "BigQuery", "prediction logging & analytics"),
+    ]
+    analysis = CostAnalysis(34.86, "USD", 71, 10, 61)
+    display_estimate(resources, analysis, "light")
+    out = capsys.readouterr().out
+    assert "ALWAYS-ON" in out and "USAGE-BASED" in out
+    assert "Biggest lever" in out
+    assert "SQLite" in out
+
+
+def test_display_estimate_no_lever_when_balanced(capsys):
+    resources = [
+        _rc("m.google_sql_database_instance.a", "google_sql_database_instance", 10.0, "fixed", "Cloud SQL", "db"),
+        _rc("m.google_compute_instance.b", "google_compute_instance", 10.0, "fixed", "Compute Engine VM", "vm"),
+        _rc("m.google_storage_bucket.c", "google_storage_bucket", 5.0, "usage", "GCS Bucket", "storage"),
+    ]
+    analysis = CostAnalysis(25.0, "USD", 30, 3, 27)
+    display_estimate(resources, analysis, "light")
+    out = capsys.readouterr().out
+    assert "Biggest lever" not in out  # top fixed is 40% of total, below the 50% cutoff
