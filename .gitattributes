@@ -1,21 +1,47 @@
-# Count Python and HCL only
+# Default: normalize line endings on commit, native on checkout
+* text=auto
+
+# Shell scripts MUST stay LF so they run in Linux containers.
+# Without this, a Windows clone produces CRLF which causes
+# "exec format error" inside Docker images.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Dockerfile content and configs that may run in Linux
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+.dockerignore text eol=lf
+
+# Templates rendered into Terraform / Kubernetes / YAML
+# also need stable LF since they may be consumed by Linux tools.
+*.tf text eol=lf
+*.tf.j2 text eol=lf
+*.tfvars text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.j2 text eol=lf
+*.tpl text eol=lf
+*.json text eol=lf
+
+# Python and HCL source: native auto handling
+*.py text=auto
+
+# Linguist hints for repo language stats
 *.py linguist-detectable=true
-
-# Ignore notebooks
 *.ipynb linguist-documentation
-
-# Ignore configs and data
 *.yaml linguist-documentation
 *.yml linguist-documentation
 *.json linguist-documentation
 *.csv linguist-documentation
 *.parquet linguist-documentation
-
-# Ignore templates
 *.jinja linguist-documentation
 *.j2 linguist-documentation
 *.tpl linguist-documentation
 *.tf linguist-documentation
-
-# Ignore misc
 *.md linguist-documentation
+
+# Binary files
+*.png binary
+*.jpg binary
+*.gif binary
+*.parquet binary

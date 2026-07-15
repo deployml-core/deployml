@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Dict, Optional, List
 from dataclasses import dataclass
 
+from deployml.utils.platform_compat import run_tool
+
 
 @dataclass
 class CostComponent:
@@ -48,8 +50,8 @@ def check_infracost_available() -> bool:
         bool: True if infracost is available, False otherwise.
     """
     try:
-        result = subprocess.run(
-            ["infracost", "--version"],
+        result = run_tool(
+            "infracost", ["--version"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -89,8 +91,8 @@ def run_infracost_breakdown(terraform_dir: Path, usage_file: Optional[Path] = No
         if usage_file is not None:
             cmd.extend(["--usage-file", str(usage_file)])
 
-        result = subprocess.run(
-            cmd,
+        result = run_tool(
+            cmd[0], cmd[1:],
             cwd=terraform_dir,
             capture_output=True,
             text=True,

@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import sys
 import importlib.resources as pkg_resources
 from pathlib import Path
 from typing import Optional
@@ -7,7 +8,7 @@ from google.cloud import storage
 import random
 import string
 from deployml.utils.constants import ANIMAL_NAMES, FALLBACK_WORDS, TERRAFORM_DIR
-import subprocess
+from deployml.utils.platform_compat import run_tool, resolve_tool, terraform_env
 import time
 from rich.progress import (
     Progress,
@@ -46,10 +47,143 @@ def check_gcp_auth() -> bool:
         bool: True if authenticated, False otherwise.
     """
     try:
-        result = subprocess.run(
-            ["gcloud", "auth", "list"], capture_output=True, text=True
+        result = run_tool(
+            "gcloud", ["auth", "list"], capture_output=True, text=True
         )
         return "ACTIVE" in result.stdout
+    except Exception:
+        return False
+
+
+def check_gcp_adc() -> bool:
+    """Application Default Credentials are required by Terraform and client libs."""
+    try:
+        result = run_tool(
+            "gcloud", ["auth", "application-default", "print-access-token"],
+            capture_output=True, text=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def check_bq() -> bool:
+    if not shutil.which("bq"):
+        return False
+    try:
+        result = run_tool(
+            "bq", ["version"], capture_output=True, text=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def get_terraform_version() -> Optional[tuple]:
+    """Return (major, minor, patch) or None."""
+    if not shutil.which("terraform"):
+        return None
+    try:
+        import json as _json
+        result = run_tool(
+            "terraform", ["version", "-json"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return None
+        data = _json.loads(result.stdout)
+        parts = data.get("terraform_version", "").split(".")
+        return tuple(int(p) for p in parts[:3])
+    except Exception:
+        return None
+
+
+def validate_gcp_project(project_id: str) -> bool:
+    """Verify project exists and active gcloud account can access it."""
+    try:
+        result = run_tool(
+            "gcloud", ["projects", "describe", project_id,
+                       "--format=value(projectId)"],
+            capture_output=True, text=True,
+        )
+        return result.returncode == 0 and result.stdout.strip() == project_id
+    except Exception:
+        return False
+
+
+_GCP_REGIONS_CACHE: Optional[set] = None
+
+
+def validate_gcp_region(region: str, project_id: Optional[str] = None) -> bool:
+    """Check region exists. Cached. Returns True on lookup failure to avoid blocking."""
+    global _GCP_REGIONS_CACHE
+    if _GCP_REGIONS_CACHE is None:
+        cmd = ["gcloud", "compute", "regions", "list", "--format=value(name)"]
+        if project_id:
+            cmd += ["--project", project_id]
+        try:
+            result = run_tool(cmd[0], cmd[1:], capture_output=True, text=True)
+            if result.returncode != 0:
+                print(
+                    f"Warning: could not verify region '{region}' "
+                    "(gcloud compute regions list failed). Proceeding unvalidated; "
+                    "a typo here surfaces later as a confusing Terraform error.",
+                    file=sys.stderr,
+                )
+                return True
+            _GCP_REGIONS_CACHE = set(result.stdout.strip().splitlines())
+        except Exception:
+            print(
+                f"Warning: could not verify region '{region}' "
+                "(gcloud unavailable). Proceeding unvalidated.",
+                file=sys.stderr,
+            )
+            return True
+    return region in _GCP_REGIONS_CACHE
+
+
+def get_missing_iam_roles(project_id: str, required_roles: list) -> list:
+    """Return roles the active account lacks. roles/owner short-circuits to empty."""
+    try:
+        import json as _json
+        account_result = run_tool(
+            "gcloud", ["config", "get-value", "account"],
+            capture_output=True, text=True,
+        )
+        account = account_result.stdout.strip()
+        if not account:
+            return list(required_roles)
+
+        result = run_tool(
+            "gcloud", ["projects", "get-iam-policy", project_id, "--format=json"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return list(required_roles)
+
+        policy = _json.loads(result.stdout)
+        member_keys = {f"user:{account}", f"serviceAccount:{account}"}
+        held = set()
+        for binding in policy.get("bindings", []):
+            if any(m in member_keys for m in binding.get("members", [])):
+                held.add(binding["role"])
+
+        if "roles/owner" in held:
+            return []
+        return [r for r in required_roles if r not in held]
+    except Exception:
+        return list(required_roles)
+
+
+def check_docker_daemon() -> bool:
+    """Returns True if docker daemon is reachable (not just binary present)."""
+    if not shutil.which("docker"):
+        return False
+    try:
+        result = run_tool(
+            "docker", ["info"], capture_output=True, text=True,
+        )
+        return result.returncode == 0
     except Exception:
         return False
 
@@ -265,12 +399,11 @@ def cleanup_cloud_sql_resources(terraform_dir: Path, project_id: str):
     delete databases and users. We just restart the instance — that kills all
     active connections — and let Terraform handle the actual resource deletion.
     """
-    import subprocess
     import time as _time
 
     try:
-        result = subprocess.run(
-            ["terraform", "output", "-raw", "instance_connection_name"],
+        result = run_tool(
+            "terraform", ["output", "-raw", "instance_connection_name"],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -283,9 +416,9 @@ def cleanup_cloud_sql_resources(terraform_dir: Path, project_id: str):
         instance_name = parts[2] if len(parts) == 3 else instance_connection_name
 
         print(f"🗄️  Restarting Cloud SQL instance to close active connections: {instance_name}")
-        subprocess.run(
-            ["gcloud", "sql", "instances", "restart", instance_name,
-             "--project", project_id, "--quiet"],
+        run_tool(
+            "gcloud", ["sql", "instances", "restart", instance_name,
+                       "--project", project_id, "--quiet"],
             capture_output=True,
             text=True,
         )
@@ -301,8 +434,6 @@ def cleanup_terraform_files(terraform_dir: Path):
     """
     Clean up Terraform state and lock files from the specified directory.
     """
-    import shutil
-
     cleanup_files = [
         ".terraform",
         "terraform.tfstate",
@@ -334,6 +465,17 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
     Returns:
         int: The return code of the process.
     """
+    # Resolve the tool to its real path so the streaming Popen calls below work on
+    # Windows, where a bare .cmd name would fail. terraform is a real .exe, but
+    # resolving keeps this robust if the front tool ever changes.
+    cmd = [resolve_tool(cmd[0]), *cmd[1:]]
+
+    # On Windows, ensure terraform's local-exec bash interpreter resolves to Git
+    # bash, not the WSL launcher in System32 which mangles quoting and breaks the
+    # Cloud SQL readiness provisioner. None off Windows, so behavior is unchanged
+    # on macOS and Linux.
+    tf_env = terraform_env()
+
     # Default messages if stack is not provided
     default_msgs = [
         "DeployML: Preparing your cloud environment...",
@@ -360,9 +502,11 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
     log_file = cwd / "terraform_apply.log"
 
     if verbose:
-        with open(log_file, "w") as f:
+        with open(log_file, "w", encoding="utf-8", errors="replace") as f:
             process = subprocess.Popen(
-                cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                encoding="utf-8", errors="replace",
+                env=tf_env,
             )
             for line in iter(process.stdout.readline, ""):
                 print(line, end="", flush=True)
@@ -380,10 +524,10 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
         task = progress.add_task(resource_msgs[0], total=100)
 
         # Open log file and keep it open until process completes
-        f = open(log_file, "w")
+        f = open(log_file, "w", encoding="utf-8", errors="replace")
         try:
             process = subprocess.Popen(
-                cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT
+                cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, env=tf_env
             )
             start_time = time.time()
             estimated_seconds = estimated_minutes * 60

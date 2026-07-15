@@ -6,6 +6,16 @@ deployml is a Python library that deploys a complete MLOps infrastructure in GCP
 
 You define your stack in a YAML config file, run `deployml deploy`, and Terraform provisions everything in GCP. When you're done, `deployml destroy` tears it all down cleanly.
 
+## Deployment targets
+
+Cloud Run is the primary, fully supported target and is what the rest of this page describes. The same MLflow and FastAPI stack can also run on Kubernetes, selected by `deployment.type` in your config:
+
+- `cloud_run` — serverless on GCP Cloud Run, the default.
+- `gke` — a Google Kubernetes Engine cluster, where MLflow gets a PersistentVolumeClaim so experiment data survives pod restarts.
+- Local **minikube**, for testing without GCP, via the `minikube-*` and `mlflow-*` commands.
+
+See [CLI Commands](../api/cli-commands.md) and the [GKE flow notes](../tutorials/gcp-cloud-run.md#gke-flow-notes) for the Kubernetes paths.
+
 ## What gets deployed
 
 ### Experiment Tracking, Artifact Storage, and Model Registry — MLflow

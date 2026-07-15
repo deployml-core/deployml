@@ -8,10 +8,10 @@ resource "google_cloud_run_service" "fastapi" {
   template {
     metadata {
       annotations = merge({
-        "autoscaling.knative.dev/maxScale" = "10"
-        "run.googleapis.com/cpu-throttling" = "false"
+        "autoscaling.knative.dev/maxScale"         = "10"
+        "run.googleapis.com/cpu-throttling"        = "false"
         "run.googleapis.com/execution-environment" = "gen2"
-      }, var.use_postgres && var.cloudsql_instance_annotation != "" ? {
+        }, var.use_postgres && var.cloudsql_instance_annotation != "" ? {
         "run.googleapis.com/cloudsql-instances" = var.cloudsql_instance_annotation
       } : {})
     }
@@ -26,18 +26,6 @@ resource "google_cloud_run_service" "fastapi" {
         env {
           name  = "MODEL_URI"
           value = var.model_uri
-        }
-        env {
-          name  = "BACKEND_STORE_URI"
-          value = var.backend_store_uri
-        }
-        env {
-          name  = "USE_POSTGRES"
-          value = var.use_postgres ? "true" : "false"
-        }
-        env {
-          name  = "DATABASE_URL"
-          value = var.use_postgres ? (var.db_connection_string != "" ? var.db_connection_string : var.backend_store_uri) : "sqlite:///app.db"
         }
         env {
           name  = "FEAST_SERVICE_URL"
@@ -64,7 +52,7 @@ resource "google_cloud_run_service" "fastapi" {
         ports {
           container_port = 8080
         }
-        
+
         # Health check
         liveness_probe {
           http_get {
@@ -72,20 +60,20 @@ resource "google_cloud_run_service" "fastapi" {
             port = 8080
           }
           initial_delay_seconds = 30
-          timeout_seconds = 10
-          period_seconds = 30
-          failure_threshold = 3
+          timeout_seconds       = 10
+          period_seconds        = 30
+          failure_threshold     = 3
         }
-        
+
         startup_probe {
           http_get {
             path = "/health"
             port = 8080
           }
           initial_delay_seconds = 10
-          timeout_seconds = 10
-          period_seconds = 10
-          failure_threshold = 10
+          timeout_seconds       = 10
+          period_seconds        = 10
+          failure_threshold     = 10
         }
       }
     }

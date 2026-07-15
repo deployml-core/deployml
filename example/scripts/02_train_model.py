@@ -5,16 +5,20 @@ import os
 import numpy as np
 import mlflow
 import mlflow.sklearn
+from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import root_mean_squared_error, r2_score
 from google.cloud import bigquery
 from dotenv import load_dotenv
 
-load_dotenv()
+# Read .env from the user's working dir, not the script's location.
+load_dotenv(Path.cwd() / ".env")
 
-MLFLOW_URL     = os.environ["MLFLOW_URL"]
-PROJECT        = os.environ["BIGQUERY_PROJECT"]
+MLFLOW_URL = os.environ.get("MLFLOW_URL")
+PROJECT    = os.environ.get("BIGQUERY_PROJECT")
+if not MLFLOW_URL or not PROJECT:
+    raise SystemExit("MLFLOW_URL or BIGQUERY_PROJECT missing. Run `deployml get-urls` to write .env.")
 DATASET        = os.getenv("BIGQUERY_DATASET", "mlops")
 EXPERIMENT     = "housing-price-prediction"
 FEATURE_COLS   = ["bedrooms", "bathrooms", "area_sqft", "lot_size", "year_built", "city", "state"]

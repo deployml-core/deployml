@@ -29,13 +29,10 @@ deployml = "deployml.cli.cli:main"
 
 [tool.poetry]
 packages = [{include = "deployml", from = "src"}]
-
-[tool.setuptools]
-include-package-data = true
-
-[tool.setuptools.package-data]
-mlops_infra = [
-  "docker/**"
+include = [
+  { path = "src/deployml/docker/**/*", format = ["sdist", "wheel"] },
+  { path = "src/deployml/templates/**/*", format = ["sdist", "wheel"] },
+  { path = "src/deployml/terraform/**/*", format = ["sdist", "wheel"] }
 ]
 
 [build-system]
