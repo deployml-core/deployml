@@ -98,7 +98,7 @@ deployml get-urls --show-secrets
 
 ## `deployml destroy`
 
-Tear down all infrastructure for a given config. Also removes the Artifact Registry repo and the Cloud Build staging bucket created by build-images, so a destroyed project leaves no billing residue.
+Tear down all infrastructure for a given config. Also removes the Artifact Registry repo and the Cloud Build staging bucket created by build-images, so a destroyed project leaves no billing residue. Pass `--keep-images` when other workspaces in the same project share those images.
 
 ```bash
 deployml destroy --yes
@@ -107,8 +107,10 @@ deployml destroy --yes
 **Options:**
 - `--config-path`, `-c`: Path to config YAML. Default `config.yaml`.
 - `--clean-workspace`: Remove the local `.deployml/` workspace folder after destroy.
-- `--yes`, `-y`: Skip both the destroy confirmation and the Terraform state cleanup prompt.
+- `--yes`, `-y`: Skip both the destroy confirmation and the Terraform state cleanup prompt. Also auto-confirms image cleanup.
 - `--workspace`: Override the workspace name from config.
+- `--keep-images`: Keep the Artifact Registry repo and the Cloud Build staging bucket. Use when other workspaces in the same project still run on those images.
+- `--repository`: Artifact Registry repo to delete. Default `mlops-images`. Match the `--repository` you passed to build-images.
 
 On partial failure, Terraform state is preserved and the command prints recovery instructions including `gcloud asset search-all-resources` for finding residual resources.
 

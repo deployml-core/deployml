@@ -71,7 +71,8 @@ output "grafana_connection_string_cloud_sql" {
 }
 
 output "postgres_host" {
-  value = google_sql_database_instance.postgres.public_ip_address
+  description = "Cloud SQL Auth Proxy socket directory, usable as a psycopg/libpq host=. Direct TCP to the public IP is blocked (no authorized networks), so consumers must connect through the /cloudsql socket mounted via the Cloud Run annotation/volume."
+  value       = "/cloudsql/${google_sql_database_instance.postgres.connection_name}"
 }
 
 output "postgres_port" {

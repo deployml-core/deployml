@@ -242,7 +242,8 @@ module "{{ stage_name }}_{{ tool.name }}" {
   feast_online_store_database = module.cloud_sql_postgres.postgres_database
   feast_online_store_user = module.cloud_sql_postgres.postgres_user
   feast_online_store_password = module.cloud_sql_postgres.postgres_password
-  feast_registry_path = module.cloud_sql_postgres.feast_connection_string
+  # Socket DSN: the public-IP variant no longer works with authorized networks removed.
+  feast_registry_path = module.cloud_sql_postgres.feast_connection_string_cloud_sql
   {% endif %}
   
   # Grafana configuration for drift monitoring - check if grafana exists in stack

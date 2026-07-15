@@ -78,7 +78,7 @@ See [example/README.md](example/README.md) for details.
 deployml destroy
 ```
 
-Deletes all Cloud Run services, Cloud SQL, the GCS bucket, and the BigQuery dataset, and also removes the Artifact Registry repo and the Cloud Build staging bucket that `build-images` created, so a destroyed project leaves no billing residue. Does not delete the GCP project itself.
+Deletes all Cloud Run services, Cloud SQL, the GCS bucket, and the BigQuery dataset, and also removes the Artifact Registry repo and the Cloud Build staging bucket that `build-images` created, so a destroyed project leaves no billing residue. Pass `--keep-images` if other workspaces in the same project share those images. Does not delete the GCP project itself.
 
 ## Full Tutorial
 
