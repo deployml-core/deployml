@@ -124,7 +124,8 @@ module "{{ stage_name }}_{{ tool.name }}" {
   bucket_exists = {% if create_artifact_bucket and tool.params.get("artifact_bucket") %}true{% else %}false{% endif %}
   
   {% if flags.needs_postgres %}
-  backend_store_uri = module.cloud_sql_postgres.connection_string
+  # Socket DSN. Public IP is blocked; Cloud SQL Auth Proxy via annotation only.
+  backend_store_uri = module.cloud_sql_postgres.connection_string_cloud_sql
   cloudsql_instance_annotation = module.cloud_sql_postgres.instance_connection_name
   {% else %}
   backend_store_uri = "{{ tool.params.get('backend_store_uri', 'sqlite:///' + tool.name + '.db') }}"
@@ -153,7 +154,7 @@ module "{{ stage_name }}_{{ tool.name }}" {
   
   # Database connection configuration
   {% if flags.needs_postgres %}
-  db_connection_string = module.cloud_sql_postgres.connection_string
+  db_connection_string = module.cloud_sql_postgres.connection_string_cloud_sql
   {% else %}
   db_connection_string = ""
   {% endif %}
@@ -176,7 +177,8 @@ module "{{ stage_name }}_{{ tool.name }}" {
   # Feast-specific parameters
   {% if tool.name == "feast" and flags.needs_postgres %}
   backend_store_uri = module.cloud_sql_postgres.feast_connection_string_cloud_sql
-  postgres_host = module.cloud_sql_postgres.db_public_ip
+  # Socket dir, not the public IP: direct TCP to the instance is blocked.
+  postgres_host = module.cloud_sql_postgres.postgres_host
   postgres_port = "5432"
   postgres_database = "feast"
   postgres_user = module.cloud_sql_postgres.db_user
@@ -270,8 +272,11 @@ module "{{ stage_name }}_{{ tool.name }}" {
   
   # Database configuration
   {% if flags.needs_postgres %}
-  database_url = module.cloud_sql_postgres.connection_string
-  feast_online_store_host = module.cloud_sql_postgres.db_public_ip
+  # Socket-based access only: the instance has no authorized networks, so jobs
+  # must mount the /cloudsql volume (cloud_sql_connection_name) and use socket DSNs.
+  cloud_sql_connection_name = module.cloud_sql_postgres.instance_connection_name
+  database_url = module.cloud_sql_postgres.connection_string_cloud_sql
+  feast_online_store_host = module.cloud_sql_postgres.postgres_host
   feast_online_store_port = "5432"
   feast_online_store_database = "feast"
   feast_online_store_user = module.cloud_sql_postgres.db_user
