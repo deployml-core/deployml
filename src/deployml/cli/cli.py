@@ -1640,6 +1640,16 @@ def destroy(
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip confirmation prompts and destroy"
     ),
+    keep_images: bool = typer.Option(
+        False, "--keep-images",
+        help="Keep the Artifact Registry repo and Cloud Build staging bucket. "
+        "Use when other workspaces in the same project share the images.",
+    ),
+    repository: str = typer.Option(
+        "mlops-images", "--repository",
+        help="Artifact Registry repository to delete after destroy. "
+        "Match the --repository you passed to build-images.",
+    ),
 ):
     """
     Destroy infrastructure and optionally clean up workspace and Terraform state files.
@@ -1751,27 +1761,40 @@ def destroy(
         if result.returncode == 0:
             typer.echo(" Infrastructure destroyed successfully!")
 
-            # Clean up the Artifact Registry repo created by build-images.
-            # Terraform does not manage it, so without this it lingers and bills.
+            # Clean up the Artifact Registry repo created by build-images and the
+            # Cloud Build staging bucket. Terraform does not manage either, so
+            # without this they linger and bill. The repo may be shared by other
+            # workspaces deployed to the same project, so this is skippable via
+            # --keep-images and confirmed interactively when not --yes.
             region = config.get("provider", {}).get("region", "us-central1")
-            ar_repo = "mlops-images"
-            typer.echo(f" Removing Artifact Registry repo {ar_repo}...")
-            run_tool(
-                "gcloud", ["artifacts", "repositories", "delete", ar_repo,
-                           "--location", region, "--project", project_id, "--quiet"],
-                capture_output=True,
-            )
-
-            # Clean up the Cloud Build staging bucket that `gcloud builds submit`
-            # auto-creates during build-images. It is not Terraform-managed and
-            # accumulates source tarballs across cycles. Best-effort; Cloud Build
-            # recreates it on the next build if needed.
             cb_bucket = f"gs://{project_id}_cloudbuild"
-            typer.echo(f" Removing Cloud Build staging bucket {cb_bucket}...")
-            run_tool(
-                "gcloud", ["storage", "rm", "--recursive", cb_bucket, "--quiet"],
-                capture_output=True,
-            )
+            if keep_images:
+                typer.echo(
+                    f" Keeping Artifact Registry repo {repository} and {cb_bucket} (--keep-images)."
+                )
+            elif yes or typer.confirm(
+                f"Also delete Artifact Registry repo '{repository}' and Cloud Build "
+                f"staging bucket {cb_bucket}? Other workspaces in project "
+                f"'{project_id}' may still use these images.",
+                default=True,
+            ):
+                typer.echo(f" Removing Artifact Registry repo {repository}...")
+                run_tool(
+                    "gcloud", ["artifacts", "repositories", "delete", repository,
+                               "--location", region, "--project", project_id, "--quiet"],
+                    capture_output=True,
+                )
+
+                # The staging bucket auto-created by `gcloud builds submit` accumulates
+                # source tarballs across cycles. Best-effort; Cloud Build recreates it
+                # on the next build if needed.
+                typer.echo(f" Removing Cloud Build staging bucket {cb_bucket}...")
+                run_tool(
+                    "gcloud", ["storage", "rm", "--recursive", cb_bucket, "--quiet"],
+                    capture_output=True,
+                )
+            else:
+                typer.echo(f" Keeping Artifact Registry repo {repository} and {cb_bucket}.")
 
             if clean_workspace:
                 typer.echo(" Cleaning workspace...")
