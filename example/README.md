@@ -5,7 +5,7 @@ This example walks through a complete MLOps workflow using a synthetic housing p
 ## Prerequisites
 
 1. Deploy the infrastructure following the [GCP Cloud Run tutorial](../docs/tutorials/gcp-cloud-run.md)
-2. Run `deployml get-urls --config-path config.yaml` to generate your `.env` file
+2. Run `deployml get-urls` to generate your `.env` file. The scripts read it from your current working directory.
 3. Install Python dependencies:
 
 ```bash
@@ -14,14 +14,18 @@ pip install mlflow scikit-learn pandas numpy google-cloud-bigquery db-dtypes pyt
 
 ## Environment
 
-All scripts read from the `.env` file written by `deployml get-urls`. It should contain:
+All scripts read from the `.env` file written by `deployml get-urls`. It contains:
 
 ```
 MLFLOW_URL=https://...
 FASTAPI_URL=https://...
 GRAFANA_URL=https://...
-BIGQUERY_PROJECT=your-project-id
+ARTIFACT_BUCKET=mlflow-artifacts-YOUR_GCP_PROJECT_ID
+BIGQUERY_PROJECT=YOUR_GCP_PROJECT_ID
 BIGQUERY_DATASET=mlops
+GRAFANA_ADMIN_PASSWORD_SECRET_ID=grafana-server-admin-password
+MLFLOW_DSN_SECRET_ID=mlflow-postgres-YOUR_GCP_PROJECT_ID-mlflow-dsn
+INSTANCE_CONNECTION_NAME=YOUR_GCP_PROJECT_ID:us-west1:mlflow-postgres-YOUR_GCP_PROJECT_ID
 ```
 
 ## Scripts
@@ -38,7 +42,7 @@ Generates 500 rows of synthetic housing data and loads them into the `offline_fe
 
 Verify:
 ```bash
-bq query --use_legacy_sql=false 'SELECT COUNT(*) FROM `YOUR_PROJECT.mlops.offline_features`'
+bq query --use_legacy_sql=false 'SELECT COUNT(*) FROM `'$BIGQUERY_PROJECT'.mlops.offline_features`'
 ```
 
 ### Step 2 — Train a model with MLflow
@@ -71,7 +75,7 @@ Pulls 50 rows from `offline_features` and sends each to FastAPI `/predict`. Fast
 
 Verify:
 ```bash
-bq query --use_legacy_sql=false 'SELECT COUNT(*) FROM `YOUR_PROJECT.mlops.predictions`'
+bq query --use_legacy_sql=false 'SELECT COUNT(*) FROM `'$BIGQUERY_PROJECT'.mlops.predictions`'
 ```
 
 Also check FastAPI is serving the model:
@@ -108,7 +112,7 @@ Provisions a monitoring dashboard in Grafana via the API showing:
 - Feature mean shift per feature
 - MAE over time
 
-Open `GRAFANA_URL` in your browser (login: `admin` / `admin`) to view the dashboard.
+Open `GRAFANA_URL` in your browser to view the dashboard. The username is `admin`. Fetch the password with `deployml get-urls --show-secrets`, which prints it directly and also gives you the secret ID for later. Script 07 itself fetches the password from Secret Manager automatically using `GRAFANA_ADMIN_PASSWORD_SECRET_ID` from `.env`.
 
 ## Dataset
 

@@ -9,7 +9,7 @@ A CLI tool that deploys a production MLOps stack on GCP with a single command. B
 - **Grafana** — monitoring dashboard connected to your metrics database
 - **BigQuery** — `mlops` dataset with tables for features, predictions, ground truth, and drift metrics
 
-All running on GCP Cloud Run — no servers to manage, scales to zero when idle.
+All running on GCP Cloud Run. No servers to manage. Cloud Run services scale to zero when idle. Cloud SQL and BigQuery storage incur baseline cost. See Costs below.
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ pip install deployml-core
 **2. Initialize your GCP project** (enables APIs, creates Artifact Registry)
 
 ```bash
-deployml init --provider gcp --project-id YOUR_PROJECT_ID
+deployml init --provider gcp --project-id YOUR_GCP_PROJECT_ID
 ```
 
 **3. Configure**
@@ -78,15 +78,30 @@ See [example/README.md](example/README.md) for details.
 deployml destroy
 ```
 
-Deletes all Cloud Run services, Cloud SQL, GCS bucket, and BigQuery dataset. Does not delete Artifact Registry images or the GCP project.
+Deletes all Cloud Run services, Cloud SQL, the GCS bucket, and the BigQuery dataset, and also removes the Artifact Registry repo and the Cloud Build staging bucket that `build-images` created, so a destroyed project leaves no billing residue. Pass `--keep-images` if other workspaces in the same project share those images. Does not delete the GCP project itself.
 
 ## Full Tutorial
 
 See [docs/tutorials/gcp-cloud-run.md](docs/tutorials/gcp-cloud-run.md) for a step-by-step walkthrough.
 
+## Other deployment targets
+
+Cloud Run is the primary, fully supported path. The CLI also supports Kubernetes for users who want a cluster:
+
+- **Local minikube**, for testing without GCP: `mlflow-init` and `mlflow-deploy`, or `minikube-init` and `minikube-deploy`.
+- **GKE** on GCP: `gke-cluster-create`, `gke-init`, then `gke-deploy` or `gke-apply`, torn down with `gke-destroy`.
+
+MLflow keeps its data on a PersistentVolumeClaim in both, so experiments survive pod restarts. See [CLI Commands](docs/api/cli-commands.md) and the [GKE flow notes](docs/tutorials/gcp-cloud-run.md#gke-flow-notes).
+
 ## Requirements
 
-- Python 3.10+
-- `gcloud` CLI (authenticated)
-- Docker (running)
-- Terraform
+- Python 3.11 or newer
+- `gcloud` CLI, authenticated with `gcloud auth login`, `gcloud auth application-default login`, and `gcloud auth configure-docker us-west1-docker.pkg.dev`
+- Docker, running
+- Terraform 1.0 or newer
+
+Run `deployml doctor --project-id YOUR_GCP_PROJECT_ID` to verify auth, ADC, tool versions, enabled APIs, and IAM roles on your project.
+
+## Costs
+
+Cloud Run scales to zero when idle. Cloud SQL Postgres and BigQuery storage do not. Expect roughly $30 to $80 per month while the stack is up. MLflow runs with `min_instances = 1` by default for snappy UI, which adds about $5 per month. Set `min_instances` to 0 if you want zero idle cost in exchange for cold starts. Always run `deployml destroy` when done.

@@ -21,18 +21,29 @@ resource "google_cloud_run_service" "mlflow" {
     metadata {
       annotations = merge({
         "autoscaling.knative.dev/maxScale" = "10"
+        "autoscaling.knative.dev/minScale" = tostring(var.min_instances)
         "run.googleapis.com/cpu-throttling" = "false"
       }, var.cloudsql_instance_annotation != "" ? {
         "run.googleapis.com/cloudsql-instances" = var.cloudsql_instance_annotation
       } : {})
     }
-    
+
     spec {
       container_concurrency = 80
-      timeout_seconds       = 300
-      
+      timeout_seconds       = var.request_timeout_seconds
+
       containers {
-        image = var.image        
+        image = var.image
+        startup_probe {
+          http_get {
+            path = var.startup_probe_path
+            port = 8080
+          }
+          initial_delay_seconds = 10
+          period_seconds        = 10
+          timeout_seconds       = 5
+          failure_threshold     = 30
+        }
         # Always set basic MLflow environment
         env {
           name  = "MLFLOW_SERVER_HOST"
@@ -44,23 +55,32 @@ resource "google_cloud_run_service" "mlflow" {
           value = "8080"
         }
 
-        # Allow all host headers — required for Cloud Run since the Host header
-        # is the dynamic *.run.app URL which MLflow's DNS rebinding check rejects by default
+        # Allow Host header for *.run.app since Cloud Run assigns a dynamic
+        # subdomain. Security middleware stays ON, only DNS rebinding check is relaxed.
         env {
           name  = "MLFLOW_SERVER_ALLOWED_HOSTS"
           value = "*"
         }
-        env {
-          name  = "MLFLOW_SERVER_DISABLE_SECURITY_MIDDLEWARE"
-          value = "true"
-        }
         
-        # Backend store URI
+        # Backend store URI. Prefer Secret Manager when secret_id provided so
+        # the password is not visible in the Cloud Run env tab.
         dynamic "env" {
-          for_each = var.backend_store_uri != "" ? [1] : []
+          for_each = var.backend_store_uri != "" && var.backend_store_uri_secret_id == "" ? [1] : []
           content {
             name  = "MLFLOW_BACKEND_STORE_URI"
             value = var.backend_store_uri
+          }
+        }
+        dynamic "env" {
+          for_each = var.backend_store_uri_secret_id != "" ? [1] : []
+          content {
+            name = "MLFLOW_BACKEND_STORE_URI"
+            value_from {
+              secret_key_ref {
+                name = var.backend_store_uri_secret_id
+                key  = "latest"
+              }
+            }
           }
         }
         

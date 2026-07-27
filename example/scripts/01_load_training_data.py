@@ -6,12 +6,20 @@ import uuid
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
+from pathlib import Path
 from dotenv import load_dotenv
 from google.cloud import bigquery
 
-load_dotenv()
+# Look for .env in the user's working directory, not next to this script.
+# `deployml get-urls` writes .env into the directory the user runs it from.
+load_dotenv(Path.cwd() / ".env")
 
-PROJECT = os.environ["BIGQUERY_PROJECT"]
+PROJECT = os.environ.get("BIGQUERY_PROJECT")
+if not PROJECT:
+    raise SystemExit(
+        "BIGQUERY_PROJECT is not set. Run `deployml get-urls` after `deployml deploy` to write a .env "
+        "with BIGQUERY_PROJECT, MLFLOW_URL, and others. Then re-run this script from the same directory."
+    )
 DATASET = os.getenv("BIGQUERY_DATASET", "mlops")
 TABLE = f"{PROJECT}.{DATASET}.offline_features"
 N_ROWS = 500
