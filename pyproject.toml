@@ -48,7 +48,7 @@ source-exclude = [
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "python-semantic-release>=10",
+    "python-semantic-release>=10,<11",
 ]
 
 [tool.pytest.ini_options]

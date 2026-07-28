@@ -1,8 +1,7 @@
 """Smoke tests: verify the package installs and its version resolves.
 
-These are intentionally minimal and run against whatever source is on `main`.
-The broader unit suite currently lives on the `dev` branch and targets modules
-not yet merged to `main`; it should be wired in once those land here.
+These are intentionally minimal and independent of the rest of the suite in
+`tests/`, which `pytest` already collects and runs alongside these.
 """
 
 import importlib.metadata
