@@ -41,7 +41,8 @@ def render_cloud_run():
     return _render
 
 
-def test_cloud_run_grafana_is_rendered_once(render_cloud_run):
+@pytest.mark.parametrize("template_name", ["main.tf.j2", "mlflow_main.tf.j2"])
+def test_cloud_run_grafana_is_rendered_once(render_cloud_run, template_name):
     stack = [
         {
             "model_monitoring": {
@@ -51,10 +52,9 @@ def test_cloud_run_grafana_is_rendered_once(render_cloud_run):
         }
     ]
 
-    for template_name in ("main.tf.j2", "mlflow_main.tf.j2"):
-        rendered = render_cloud_run(
-            provider="gcp",
-            stack=stack,
-            template_name=template_name,
-        )
-        assert rendered.count('module "model_monitoring_grafana"') == 1
+    rendered = render_cloud_run(
+        provider="gcp",
+        stack=stack,
+        template_name=template_name,
+    )
+    assert rendered.count('module "model_monitoring_grafana"') == 1
