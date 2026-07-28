@@ -558,7 +558,8 @@ def deploy_to_gke(
         # Wait for external IP. Earlier code did service_file.stem.replace("service", "service")
         # which is a no-op and then queried kubectl for service "service" which is wrong.
         # Read the actual service name from the rendered manifest instead.
-        import time, yaml as _yaml
+        import time
+        import yaml as _yaml
 
         max_wait = 300
         waited = 0

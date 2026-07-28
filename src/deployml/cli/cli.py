@@ -1,22 +1,15 @@
-import sys
 import yaml
 import typer
 import re
 import importlib.resources as pkg_resources
 from deployml.utils.constants import (
     TEMPLATE_DIR,
-    TERRAFORM_DIR,
-    TOOL_VARIABLES,
-    ANIMAL_NAMES,
-    FALLBACK_WORDS,
     REQUIRED_GCP_APIS,
     REQUIRED_GCP_IAM_ROLES,
 )
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 from typing import Optional
-import random
-import string
 from google.cloud import storage
 import hashlib
 
@@ -32,19 +25,16 @@ from deployml.utils.helpers import (
     validate_gcp_project,
     validate_gcp_region,
     get_missing_iam_roles,
-    check_docker_daemon,
     copy_modules_to_workspace,
     bucket_exists,
     generate_bucket_name,
     estimate_terraform_time,
-    cleanup_cloud_sql_resources,
     cleanup_terraform_files,
     run_terraform_with_loading_bar,
     _create_docker_folder,
 )
 from deployml.utils.platform_compat import (
     run_tool,
-    resolve_tool,
     configure_console_encoding,
     robust_rmtree,
 )
@@ -180,7 +170,6 @@ def extract_resource_manifest(
     Returns a manifest dictionary with all resources that need to be deleted.
     """
     import json
-    from urllib.parse import urlparse
 
     manifest = {
         "workspace_name": workspace_name,
@@ -462,7 +451,7 @@ def extract_resource_manifest(
                                         "cloud_build_triggers"
                                     ].append({"name": trigger_name})
                                     break
-            except Exception as e:
+            except Exception:
                 # Skip resources that can't be parsed
                 continue
 
@@ -554,7 +543,6 @@ def upload_resource_manifest(
         raise
 
 
-import re
 import time
 import json
 from datetime import datetime, timedelta
@@ -848,7 +836,7 @@ def doctor(
 
     # AWS CLI
     if aws_installed:
-        typer.secho(f"\n AWS CLI installed", fg=typer.colors.GREEN)
+        typer.secho("\n AWS CLI installed", fg=typer.colors.GREEN)
     else:
         typer.secho(
             "\n AWS CLI not installed",
@@ -1080,7 +1068,7 @@ def deploy(
                     artifact_root = params.get("artifact_root")
 
                     mlflow_manifest_dir = manifests_dir / "mlflow"
-                    typer.echo(f"\n Generating MLflow manifests...")
+                    typer.echo("\n Generating MLflow manifests...")
                     generate_mlflow_manifests_gke(
                         output_dir=mlflow_manifest_dir,
                         image=image,
@@ -1100,7 +1088,7 @@ def deploy(
                     )
 
                     fastapi_manifest_dir = manifests_dir / "fastapi"
-                    typer.echo(f"\n Generating FastAPI manifests...")
+                    typer.echo("\n Generating FastAPI manifests...")
                     generate_fastapi_manifests_gke(
                         output_dir=fastapi_manifest_dir,
                         image=image,
@@ -1119,7 +1107,7 @@ def deploy(
 
         # Deploy manifests
         if mlflow_manifest_dir and mlflow_manifest_dir.exists():
-            typer.echo(f"\n Deploying MLflow to GKE...")
+            typer.echo("\n Deploying MLflow to GKE...")
             if not deploy_to_gke(
                 manifest_dir=mlflow_manifest_dir,
                 cluster_name=cluster_name,
@@ -1130,7 +1118,7 @@ def deploy(
                 raise typer.Exit(code=1)
 
         if fastapi_manifest_dir and fastapi_manifest_dir.exists():
-            typer.echo(f"\n Deploying FastAPI to GKE...")
+            typer.echo("\n Deploying FastAPI to GKE...")
             if not deploy_to_gke(
                 manifest_dir=fastapi_manifest_dir,
                 cluster_name=cluster_name,
@@ -1551,13 +1539,13 @@ def deploy(
                         text=True,
                     )
                     if update_result.returncode == 0:
-                        typer.echo(f" Teardown schedule updated successfully")
+                        typer.echo(" Teardown schedule updated successfully")
                     else:
                         typer.echo(
                             f"WARNING: Warning: Could not update scheduler schedule: {update_result.stderr}"
                         )
                         typer.echo(
-                            f"   Schedule may be incorrect. Check manually with:"
+                            "   Schedule may be incorrect. Check manually with:"
                         )
                         typer.echo(
                             f"   gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id}"
@@ -1566,7 +1554,7 @@ def deploy(
                     typer.echo(
                         f"WARNING: Warning: Could not update scheduler schedule: {e}"
                     )
-                    typer.echo(f"   Schedule may be incorrect. Check manually with:")
+                    typer.echo("   Schedule may be incorrect. Check manually with:")
                     typer.echo(
                         f"   gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id}"
                     )
@@ -1662,9 +1650,9 @@ def deploy(
                 fg=typer.colors.RED,
                 bold=True,
             )
-            typer.echo(f"\n Check the Terraform log for details:")
+            typer.echo("\n Check the Terraform log for details:")
             typer.echo(f"   {log_file}")
-            typer.echo(f"\n Common issues:")
+            typer.echo("\n Common issues:")
             typer.echo(
                 "   - Required GCP APIs may not be enabled (check log for API activation URLs)"
             )
@@ -1805,7 +1793,7 @@ def get_urls(
                 text=True,
             )
             if fetch.returncode == 0:
-                typer.echo(f"  grafana_admin_user: admin")
+                typer.echo("  grafana_admin_user: admin")
                 typer.echo(f"  grafana_admin_password: {fetch.stdout.strip()}")
             else:
                 typer.echo(
@@ -1898,7 +1886,7 @@ def destroy(
         return
 
     try:
-        typer.echo(f" Destroying infrastructure...")
+        typer.echo(" Destroying infrastructure...")
 
         # Set GCP project
         run_tool(
@@ -2055,7 +2043,7 @@ def destroy(
                 "  1. Inspect residual resources: gcloud asset search-all-resources "
                 f"--scope=projects/{project_id}"
             )
-            typer.echo(f"  2. Re-run: deployml destroy --yes")
+            typer.echo("  2. Re-run: deployml destroy --yes")
             typer.echo(
                 f"  3. Or delete the whole project: gcloud projects delete {project_id}"
             )
@@ -2242,7 +2230,7 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
         metadata = load_deployment_metadata(deployml_dir)
         if metadata and metadata.get("teardown_enabled"):
             teardown_at = datetime.fromisoformat(metadata["teardown_scheduled_at"])
-            typer.echo(f"\n Local metadata shows teardown was scheduled for:")
+            typer.echo("\n Local metadata shows teardown was scheduled for:")
             typer.echo(f"   {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         return
 
@@ -2295,7 +2283,7 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
                 typer.echo(
                     f"   WARNING: Scheduled time passed {hours_passed}h {minutes_passed}m ago"
                 )
-        except Exception as e:
+        except Exception:
             typer.echo(f" Next Execution: {schedule_time}")
 
     # Last attempt
@@ -2315,8 +2303,8 @@ def show_teardown_status(config: dict, deployml_dir: Path, workspace_name: str):
 
     # Actions
     typer.echo("\n Actions:")
-    typer.echo(f"   Update: deployml teardown update --config-path <config-file>")
-    typer.echo(f"   Cancel: deployml teardown cancel --config-path <config-file>")
+    typer.echo("   Update: deployml teardown update --config-path <config-file>")
+    typer.echo("   Cancel: deployml teardown cancel --config-path <config-file>")
     typer.echo(
         f"   View in Console: https://console.cloud.google.com/cloudscheduler/jobs/edit/{region}/{scheduler_job_name}?project={project_id}"
     )
@@ -2453,7 +2441,7 @@ def update_teardown_schedule(
             if updated_schedule_time:
                 time_str = updated_schedule_time.replace("Z", "+00:00")
                 actual_time = datetime.fromisoformat(time_str)
-                typer.echo(f"\n Teardown schedule updated successfully!")
+                typer.echo("\n Teardown schedule updated successfully!")
                 typer.echo(
                     f"   Scheduled time: {actual_time.strftime('%Y-%m-%d %H:%M:%S UTC')}"
                 )
@@ -2464,7 +2452,7 @@ def update_teardown_schedule(
                     "%Y-%m-%d %H:%M"
                 ):
                     typer.echo(
-                        f"\nWARNING: Warning: Scheduled time differs from intended time"
+                        "\nWARNING: Warning: Scheduled time differs from intended time"
                     )
                     typer.echo(
                         f"   Intended: {teardown_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
@@ -2473,12 +2461,12 @@ def update_teardown_schedule(
                         f"   Actual: {actual_time.strftime('%Y-%m-%d %H:%M:%S UTC')}"
                     )
             else:
-                typer.echo(f" Teardown schedule updated successfully!")
+                typer.echo(" Teardown schedule updated successfully!")
                 typer.echo(f"   Cron schedule: {updated_schedule}")
         except Exception as e:
             typer.echo(f" Teardown schedule updated (verification failed: {e})")
     else:
-        typer.echo(f" Teardown schedule updated successfully!")
+        typer.echo(" Teardown schedule updated successfully!")
         typer.echo(
             f"   (Could not verify - check with: gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id})"
         )
@@ -3043,7 +3031,6 @@ def gke_destroy(
         raise typer.Exit(code=1)
 
     from deployml.utils.kubernetes_gke import (
-        connect_to_gke_cluster,
         get_pvc_volume_handle,
         disk_ref_from_volume_handle,
         delete_gce_disk_if_exists,
@@ -3305,7 +3292,7 @@ def gke_apply(
         typer.echo("Either config.gke.zone or config.gke.region must be specified")
         raise typer.Exit(code=1)
 
-    typer.echo(f" Applying GKE manifests")
+    typer.echo(" Applying GKE manifests")
     typer.echo(f"   Cluster: {cluster_name}")
     typer.echo(f"   Location: {zone or region_gke}")
     typer.echo(f"   Manifests: {manifests_dir}")
@@ -3313,7 +3300,6 @@ def gke_apply(
     # Import deployment function
     from deployml.utils.kubernetes_gke import (
         deploy_to_gke,
-        connect_to_gke_cluster,
     )
 
     # Connect to GKE cluster
@@ -3333,7 +3319,7 @@ def gke_apply(
     deployed_any = False
 
     if mlflow_manifest_dir.exists():
-        typer.echo(f"\n Deploying MLflow to GKE...")
+        typer.echo("\n Deploying MLflow to GKE...")
         if deploy_to_gke(
             manifest_dir=mlflow_manifest_dir,
             cluster_name=cluster_name,
@@ -3347,7 +3333,7 @@ def gke_apply(
             raise typer.Exit(code=1)
 
     if fastapi_manifest_dir.exists():
-        typer.echo(f"\n Deploying FastAPI to GKE...")
+        typer.echo("\n Deploying FastAPI to GKE...")
         if deploy_to_gke(
             manifest_dir=fastapi_manifest_dir,
             cluster_name=cluster_name,

@@ -3,7 +3,6 @@ import yaml
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, Any
 
 from .stack import DeploymentStack
 
@@ -63,7 +62,7 @@ def deploy(config_path: str, show_progress: bool = True) -> DeploymentStack:
     print(f"📄 Configuration: {config_path}")
 
     if show_progress:
-        print(f"\n⏳ Initializing deployment...")
+        print("\n⏳ Initializing deployment...")
 
     # Setup workspace
     workspace_name = config.get("name", "default")
@@ -176,7 +175,7 @@ def _format_deployment_line(line: str) -> str:
     elif line.startswith("💰 COST ANALYSIS"):
         return f"\n{'=' * 60}\n💰 COST ANALYSIS\n{'=' * 60}"
     elif line.startswith("✅ Deployment complete!"):
-        return f"\n✅ INFRASTRUCTURE DEPLOYMENT COMPLETE!"
+        return "\n✅ INFRASTRUCTURE DEPLOYMENT COMPLETE!"
     elif "DeployML: Creating resources" in line:
         # Show progress lines for better user feedback
         if any(
@@ -301,7 +300,7 @@ def _deploy_with_cli(config_path: str, workspace_dir: Path) -> None:
         sys.stdout.flush()
         sys.stderr.flush()
 
-        print(f"\n" + "=" * 60, flush=True)
+        print("\n" + "=" * 60, flush=True)
         print(f"❌ DEPLOYMENT FAILED (Exit Code: {process.returncode})", flush=True)
         print("=" * 60, flush=True)
 

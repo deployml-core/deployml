@@ -14,7 +14,6 @@ Override by exporting GRAFANA_PASSWORD if you prefer.
 """
 
 import os
-import json
 import subprocess
 import requests
 from pathlib import Path

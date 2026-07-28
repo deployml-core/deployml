@@ -1,7 +1,7 @@
 import subprocess
 import typer
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional
 from jinja2 import Environment, FileSystemLoader
 from deployml.utils.constants import TEMPLATE_DIR
 from deployml.utils.platform_compat import run_tool

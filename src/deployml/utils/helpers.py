@@ -7,7 +7,7 @@ from typing import Optional
 from google.cloud import storage
 import random
 import string
-from deployml.utils.constants import ANIMAL_NAMES, FALLBACK_WORDS, TERRAFORM_DIR
+from deployml.utils.constants import TERRAFORM_DIR
 from deployml.utils.platform_compat import run_tool, resolve_tool, terraform_env
 import time
 from rich.progress import (

@@ -589,7 +589,7 @@ class DeploymentStack:
 
         print(f"\n📌 Job Name: {status.get('scheduler_job_name')}")
         print("\n💡 Actions:")
-        print(f"   Update: stack.update_teardown_schedule(duration_hours=6)")
-        print(f"   Cancel: stack.cancel_teardown()")
+        print("   Update: stack.update_teardown_schedule(duration_hours=6)")
+        print("   Cancel: stack.cancel_teardown()")
 
         print("=" * 80)

@@ -6,11 +6,8 @@ This function uses the DeployML CLI approach: it calls terraform destroy
 on the workspace directory stored in GCS, or uses terraform remote state.
 """
 
-import os
-import json
 import subprocess
 import tempfile
-import shutil
 from pathlib import Path
 from google.cloud import storage as gcs
 import logging
@@ -191,7 +188,7 @@ def destroy_via_remote_state(project_id: str, workspace_name: str, state_bucket:
         # For now, return an error suggesting manual teardown
         return {
             "status": "error",
-            "message": f"Could not automatically teardown. Please run: deployml destroy --config-path <config-file>",
+            "message": "Could not automatically teardown. Please run: deployml destroy --config-path <config-file>",
             "workspace": workspace_name,
         }, 500
     except Exception as e:

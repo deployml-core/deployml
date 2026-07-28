@@ -1,10 +1,8 @@
 import shutil
-import os
 import sys
 import platform
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-import json
+from typing import Dict, List, Optional
 import importlib
 
 from deployml.utils.platform_compat import run_tool
@@ -19,7 +17,6 @@ except ImportError:
         get_package_version_metadata = None
 from dataclasses import dataclass
 from enum import Enum
-import re
 
 try:
     import pandas as pd
@@ -374,7 +371,7 @@ class DeployMLDoctor:
                     CheckResult(
                         name=description,
                         status=CheckStatus.INFO,
-                        message=f"Not installed (optional for cloud deployments)",
+                        message="Not installed (optional for cloud deployments)",
                         fix_command=f"Install from: {install_url}",
                         required=False,
                     )

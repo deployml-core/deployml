@@ -5,7 +5,6 @@ Step 1: Generate synthetic housing data and load into BigQuery offline_features 
 import os
 import uuid
 import numpy as np
-import pandas as pd
 from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
