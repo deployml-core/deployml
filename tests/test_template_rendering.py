@@ -1,4 +1,5 @@
 """Characterize GCP cloud_run template rendering. No GCP calls, no subprocess."""
+
 import hashlib
 
 import pytest
@@ -12,10 +13,17 @@ def render_cloud_run():
     """Render templates/gcp/cloud_run/main.tf.j2 the same way cli.py's deploy
     command does, with the minimal kwargs the template can reference."""
 
-    def _render(provider: str, stack: list[dict], stack_name: str = "test-stack") -> str:
+    def _render(
+        provider: str,
+        stack: list[dict],
+        stack_name: str = "test-stack",
+        template_name: str = "main.tf.j2",
+    ) -> str:
         env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
-        template = env.get_template(f"{provider}/cloud_run/main.tf.j2")
-        name_hash = hashlib.sha1(f"{stack_name}:test-project".encode("utf-8")).hexdigest()[:6]
+        template = env.get_template(f"{provider}/cloud_run/{template_name}")
+        name_hash = hashlib.sha1(
+            f"{stack_name}:test-project".encode("utf-8")
+        ).hexdigest()[:6]
         return template.render(
             cloud=provider,
             stack=stack,
@@ -34,15 +42,19 @@ def render_cloud_run():
 
 
 def test_cloud_run_grafana_is_rendered_once(render_cloud_run):
-    rendered = render_cloud_run(
-        provider="gcp",
-        stack=[
-            {
-                "model_monitoring": {
-                    "name": "grafana",
-                    "params": {"service_name": "grafana-server"},
-                }
+    stack = [
+        {
+            "model_monitoring": {
+                "name": "grafana",
+                "params": {"service_name": "grafana-server"},
             }
-        ],
-    )
-    assert rendered.count('module "model_monitoring_grafana"') == 1
+        }
+    ]
+
+    for template_name in ("main.tf.j2", "mlflow_main.tf.j2"):
+        rendered = render_cloud_run(
+            provider="gcp",
+            stack=stack,
+            template_name=template_name,
+        )
+        assert rendered.count('module "model_monitoring_grafana"') == 1
