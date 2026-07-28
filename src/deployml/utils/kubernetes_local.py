@@ -48,9 +48,7 @@ def start_minikube() -> bool:
     """Start minikube cluster."""
     typer.echo("Starting minikube...")
     try:
-        result = run_tool(
-            "minikube", ["start"], check=True, capture_output=True, text=True
-        )
+        run_tool("minikube", ["start"], check=True, capture_output=True, text=True)
         typer.echo("Minikube started successfully!")
         return True
     except subprocess.CalledProcessError as e:

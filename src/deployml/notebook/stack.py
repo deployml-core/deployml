@@ -171,7 +171,7 @@ class DeploymentStack:
                             postgresql_info["password"] = (
                                 sensitive_result.stdout.strip()
                             )
-                        except:
+                        except Exception:
                             postgresql_info["password"] = (
                                 "[SENSITIVE - Run show_postgresql_credentials()]"
                             )

@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Optional
 from google.cloud import storage
 import hashlib
+import time
+import json
+from datetime import datetime, timedelta
 
 from deployml.notebook.docker import build_images
 
@@ -541,11 +544,6 @@ def upload_resource_manifest(
     except Exception as e:
         typer.echo(f"WARNING: Error uploading resource manifest: {e}")
         raise
-
-
-import time
-import json
-from datetime import datetime, timedelta
 
 
 def _load_config_or_exit(config_path: Path) -> dict:
@@ -1544,9 +1542,7 @@ def deploy(
                         typer.echo(
                             f"WARNING: Warning: Could not update scheduler schedule: {update_result.stderr}"
                         )
-                        typer.echo(
-                            "   Schedule may be incorrect. Check manually with:"
-                        )
+                        typer.echo("   Schedule may be incorrect. Check manually with:")
                         typer.echo(
                             f"   gcloud scheduler jobs describe {scheduler_job_name} --location={region} --project={project_id}"
                         )
@@ -1591,7 +1587,6 @@ def deploy(
                         typer.echo("\n DeployML Outputs:")
                         for key, value in outputs.items():
                             is_sensitive = value.get("sensitive", False)
-                            output_type = value.get("type")
                             output_val = value.get("value")
                             if is_sensitive:
                                 typer.secho(
@@ -1860,7 +1855,6 @@ def destroy(
     # Find the workspace
     DEPLOYML_DIR = Path.cwd() / ".deployml" / workspace_name
     DEPLOYML_TERRAFORM_DIR = DEPLOYML_DIR / "terraform"
-    DEPLOYML_MODULES_DIR = DEPLOYML_DIR / "terraform" / "modules"
 
     if not DEPLOYML_TERRAFORM_DIR.exists():
         typer.echo(f"WARNING:No workspace found for {workspace_name}")

@@ -80,7 +80,7 @@ def display_services_table(df: pd.DataFrame):
 
     try:
         display(HTML(html_content))
-    except:
+    except Exception:
         # Fallback to simple print if HTML display fails
         for _, row in df.iterrows():
             status = "[READY]" if row["Status"] == "Ready" else "[MISSING]"

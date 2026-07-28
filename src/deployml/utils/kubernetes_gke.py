@@ -212,7 +212,7 @@ def connect_to_gke_cluster(
             typer.echo("Either zone or region must be provided")
             return False
 
-        result = run_tool(cmd[0], cmd[1:], check=True, capture_output=True, text=True)
+        run_tool(cmd[0], cmd[1:], check=True, capture_output=True, text=True)
         typer.echo(f"Connected to cluster: {cluster_name}")
         # kubectl will now need the GKE auth plugin; warn early if it is missing.
         warn_if_gke_auth_plugin_missing()
@@ -231,7 +231,7 @@ def push_image_to_gcr(image_name: str, gcr_image: str, project_id: str) -> bool:
 
     try:
         # Tag image
-        tag_result = run_tool(
+        run_tool(
             "docker",
             ["tag", image_name, gcr_image],
             check=True,
@@ -240,7 +240,7 @@ def push_image_to_gcr(image_name: str, gcr_image: str, project_id: str) -> bool:
         )
 
         # Push image
-        push_result = run_tool(
+        run_tool(
             "docker", ["push", gcr_image], check=True, capture_output=True, text=True
         )
 
@@ -303,7 +303,6 @@ def generate_fastapi_manifests_gke(
     env = Environment(loader=FileSystemLoader(str(template_dir)))
 
     deployment_template = env.get_template("deployment.yaml.j2")
-    service_template = env.get_template("service.yaml.j2")
 
     # Render deployment template
     deployment_yaml = deployment_template.render(

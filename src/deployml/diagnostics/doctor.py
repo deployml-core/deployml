@@ -24,7 +24,7 @@ except ImportError:
     pd = None
 
 try:
-    from IPython.display import display, HTML
+    from IPython.display import display
 
     IN_NOTEBOOK = True
 except ImportError:
@@ -593,7 +593,7 @@ class DeployMLDoctor:
         if pd is not None:
             df = self.to_dataframe()
             if not show_all:
-                df = df[(df["status"] != "INFO") | (df["required"] == True)]
+                df = df[(df["status"] != "INFO") | df["required"]]
 
             # Style the DataFrame
             def color_status(val):

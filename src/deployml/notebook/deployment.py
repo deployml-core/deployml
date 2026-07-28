@@ -346,5 +346,5 @@ def _deploy_with_cli(config_path: str, workspace_dir: Path) -> None:
             f"Deployment failed with exit code {process.returncode}. "
             f"Check the output above for details. "
             f"Total output lines: {len(output_lines)}, "
-            f"Error-related lines: {len([l for l in output_lines if any(k in l.lower() for k in ['error', 'failed', 'fatal'])])}"
+            f"Error-related lines: {len([line for line in output_lines if any(k in line.lower() for k in ['error', 'failed', 'fatal'])])}"
         )
