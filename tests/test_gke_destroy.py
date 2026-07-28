@@ -5,6 +5,7 @@ Covers the fix for the orphaned PersistentDisk left by gke-destroy
 asynchronously, and deleting the cluster too soon orphans a billing disk. No real
 GCP or kubectl calls; run_tool is mocked at the boundary.
 """
+
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ import deployml.utils.kubernetes_gke as gke
 
 
 # ---------- disk_ref_from_volume_handle (pure parsing) ----------
+
 
 def test_disk_ref_from_zonal_volume_handle():
     h = "projects/my-proj/zones/us-west1-a/disks/pvc-1234"
@@ -31,6 +33,7 @@ def test_disk_ref_from_volume_handle_none_for_garbage():
 
 # ---------- get_pvc_volume_handle (boundary mocked) ----------
 
+
 def test_get_pvc_volume_handle_returns_handle_when_bound():
     def fake_run_tool(name, args, **kw):
         if args[:2] == ["get", "pvc"]:
@@ -42,16 +45,22 @@ def test_get_pvc_volume_handle_returns_handle_when_bound():
         raise AssertionError(f"unexpected call {args}")
 
     with patch.object(gke, "run_tool", side_effect=fake_run_tool):
-        assert gke.get_pvc_volume_handle("mlflow-pvc") == "projects/p/zones/z/disks/pvc-1"
+        assert (
+            gke.get_pvc_volume_handle("mlflow-pvc") == "projects/p/zones/z/disks/pvc-1"
+        )
 
 
 def test_get_pvc_volume_handle_none_when_unbound():
-    with patch.object(gke, "run_tool",
-                      return_value=SimpleNamespace(returncode=0, stdout="", stderr="")):
+    with patch.object(
+        gke,
+        "run_tool",
+        return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+    ):
         assert gke.get_pvc_volume_handle("mlflow-pvc") is None
 
 
 # ---------- delete_gce_disk_if_exists (boundary mocked) ----------
+
 
 def test_delete_gce_disk_skips_when_already_gone():
     """If the CSI driver already reclaimed the disk, describe fails and no delete
@@ -70,8 +79,8 @@ def test_delete_gce_disk_skips_when_already_gone():
 
 def test_delete_gce_disk_deletes_when_present():
     seq = [
-        SimpleNamespace(returncode=0, stdout="pvc-1\n", stderr=""),    # describe: found
-        SimpleNamespace(returncode=0, stdout="", stderr=""),           # delete
+        SimpleNamespace(returncode=0, stdout="pvc-1\n", stderr=""),  # describe: found
+        SimpleNamespace(returncode=0, stdout="", stderr=""),  # delete
         SimpleNamespace(returncode=1, stdout="", stderr="NOT_FOUND"),  # describe: gone
     ]
     calls = []

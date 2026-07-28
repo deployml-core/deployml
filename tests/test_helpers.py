@@ -1,4 +1,5 @@
 """Unit tests for deployml helpers and config validators. No GCP calls."""
+
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -22,6 +23,7 @@ from deployml.utils.helpers import (
 
 
 # ---------- _load_config_or_exit ----------
+
 
 def test_load_config_valid_mapping(tmp_path):
     f = tmp_path / "c.yaml"
@@ -59,6 +61,7 @@ def test_load_config_scalar_top_level_exits(tmp_path):
 
 # ---------- _validate_deploy_config_or_exit ----------
 
+
 def test_validate_deploy_full_gcp():
     cfg = {
         "provider": {"name": "gcp", "project_id": "test-123"},
@@ -82,7 +85,9 @@ def test_validate_deploy_missing_provider_exits():
 
 def test_validate_deploy_provider_not_a_dict_exits():
     with pytest.raises(typer.Exit):
-        _validate_deploy_config_or_exit({"provider": "gcp", "deployment": {"type": "x"}})
+        _validate_deploy_config_or_exit(
+            {"provider": "gcp", "deployment": {"type": "x"}}
+        )
 
 
 def test_validate_deploy_bad_provider_name_exits():
@@ -110,6 +115,7 @@ def test_validate_deploy_missing_deployment_type_exits():
 
 
 # ---------- stack validation (#53) ----------
+
 
 def test_validate_deploy_valid_stack_ok():
     cfg = {
@@ -157,11 +163,15 @@ def test_validate_deploy_stage_not_a_dict_exits():
 
 def test_validate_deploy_no_stack_key_still_ok():
     # Stack is validated only when present, so configs without it still pass.
-    cfg = {"provider": {"name": "gcp", "project_id": "x"}, "deployment": {"type": "cloud_run"}}
+    cfg = {
+        "provider": {"name": "gcp", "project_id": "x"},
+        "deployment": {"type": "cloud_run"},
+    }
     _validate_deploy_config_or_exit(cfg)
 
 
 # ---------- _gcp_credentials_preflight_or_exit (#54) ----------
+
 
 @patch("deployml.cli.cli.check_gcp_adc", return_value=True)
 @patch("deployml.cli.cli.check_gcp_auth", return_value=True)
@@ -187,6 +197,7 @@ def test_gcp_preflight_exits_when_adc_missing(mock_auth, mock_adc):
 
 # ---------- check_gcp_adc ----------
 
+
 @patch("deployml.utils.helpers.run_tool")
 def test_check_gcp_adc_returncode_zero_true(mock_run):
     mock_run.return_value = MagicMock(returncode=0)
@@ -206,6 +217,7 @@ def test_check_gcp_adc_exception_returns_false(mock_run):
 
 
 # ---------- check_bq ----------
+
 
 @patch("deployml.utils.helpers.shutil.which")
 def test_check_bq_binary_missing_false(mock_which):
@@ -230,6 +242,7 @@ def test_check_bq_binary_present_but_errors(mock_run, mock_which):
 
 
 # ---------- get_terraform_version ----------
+
 
 @patch("deployml.utils.helpers.shutil.which")
 def test_get_terraform_version_binary_missing(mock_which):
@@ -258,6 +271,7 @@ def test_get_terraform_version_bad_json_returns_none(mock_run, mock_which):
 
 # ---------- validate_gcp_project ----------
 
+
 @patch("deployml.utils.helpers.run_tool")
 def test_validate_gcp_project_exists(mock_run):
     mock_run.return_value = MagicMock(returncode=0, stdout="my-project\n")
@@ -278,6 +292,7 @@ def test_validate_gcp_project_stdout_mismatch(mock_run):
 
 
 # ---------- validate_gcp_region ----------
+
 
 @patch("deployml.utils.helpers.run_tool")
 def test_validate_gcp_region_in_list(mock_run):
@@ -308,6 +323,7 @@ def test_validate_gcp_region_lookup_failure_does_not_block(mock_run):
 
 # ---------- check_docker_daemon ----------
 
+
 @patch("deployml.utils.helpers.shutil.which")
 def test_check_docker_daemon_binary_missing(mock_which):
     mock_which.return_value = None
@@ -331,6 +347,7 @@ def test_check_docker_daemon_down(mock_run, mock_which):
 
 
 # ---------- get_missing_iam_roles ----------
+
 
 @patch("deployml.utils.helpers.run_tool")
 def test_get_missing_iam_roles_owner_short_circuits(mock_run):
@@ -375,6 +392,7 @@ def test_get_missing_iam_roles_policy_query_fails_returns_all(mock_run):
 
 
 # ---------- teardown cron timezone correctness ----------
+
 
 def test_calculate_cron_from_timestamp_round_trip():
     """The cron string must reflect the UTC time of the timestamp, with no

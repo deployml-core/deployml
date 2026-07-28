@@ -5,11 +5,11 @@ from .notebook import deploy, load, DeploymentStack, ServiceURLs
 from .diagnostics import run_doctor, check_system, DeployMLDoctor
 
 __all__ = [
-    'deploy', 
-    'load', 
-    'DeploymentStack',
-    'ServiceURLs',
-    'run_doctor',
-    'check_system', 
-    'DeployMLDoctor'
+    "deploy",
+    "load",
+    "DeploymentStack",
+    "ServiceURLs",
+    "run_doctor",
+    "check_system",
+    "DeployMLDoctor",
 ]

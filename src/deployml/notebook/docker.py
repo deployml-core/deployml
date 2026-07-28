@@ -5,8 +5,10 @@ from typing import Optional
 from deployml.utils.helpers import check_docker_daemon
 from deployml.utils.platform_compat import run_tool
 
+
 class ImageBuildError(Exception):
     pass
+
 
 def build_images(
     docker_root: Path,
@@ -59,8 +61,7 @@ def build_images(
 
     # Discover services
     services = [
-        d for d in docker_root.iterdir()
-        if d.is_dir() and (d / "Dockerfile").exists()
+        d for d in docker_root.iterdir() if d.is_dir() and (d / "Dockerfile").exists()
     ]
 
     if not services:
@@ -77,16 +78,21 @@ def build_images(
     # GCP MODE
     # ----------------------------------------
     if gcp_project_id:
-
         image_base = f"{region}-docker.pkg.dev/{gcp_project_id}/{repository}"
 
         # Create Artifact Registry repo if requested
         if create_repo:
             create_cmd = [
-                "gcloud", "artifacts", "repositories", "create", repository,
+                "gcloud",
+                "artifacts",
+                "repositories",
+                "create",
+                repository,
                 "--repository-format=docker",
-                "--location", region,
-                "--project", gcp_project_id,
+                "--location",
+                region,
+                "--project",
+                gcp_project_id,
             ]
 
             if dry_run:
@@ -96,13 +102,18 @@ def build_images(
             else:
                 print("Ensuring Artifact Registry repository exists...")
                 create_proc = run_tool(
-                    create_cmd[0], create_cmd[1:], check=False,
-                    capture_output=True, text=True,
+                    create_cmd[0],
+                    create_cmd[1:],
+                    check=False,
+                    capture_output=True,
+                    text=True,
                 )
                 stderr_lower = (create_proc.stderr or "").lower()
                 if create_proc.returncode == 0:
                     print(f"Created repository: {repository}")
-                elif "already exists" in stderr_lower or "alreadyexists" in stderr_lower:
+                elif (
+                    "already exists" in stderr_lower or "alreadyexists" in stderr_lower
+                ):
                     print(f"Repository {repository} already exists, reusing.")
                 else:
                     raise ImageBuildError(
@@ -116,10 +127,14 @@ def build_images(
             image_uri = f"{image_base}/{service_name}:{tag}"
 
             build_cmd = [
-                "gcloud", "builds", "submit",
+                "gcloud",
+                "builds",
+                "submit",
                 str(service_dir),
-                "--tag", image_uri,
-                "--project", gcp_project_id,
+                "--tag",
+                image_uri,
+                "--project",
+                gcp_project_id,
             ]
 
             if dry_run:
@@ -163,14 +178,17 @@ def build_images(
     if dry_run:
         print("Dry run complete. No commands were executed.")
 
+
 # -----------------------------
 # Local Docker Build
 # -----------------------------
 
+
 def _validate_docker():
     try:
         run_tool(
-            "docker", ["--version"],
+            "docker",
+            ["--version"],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -206,10 +224,12 @@ def _build_locally(service_dirs: list[Path], tag: str):
 # GCP Cloud Build
 # -----------------------------
 
+
 def _validate_gcloud():
     try:
         run_tool(
-            "gcloud", ["--version"],
+            "gcloud",
+            ["--version"],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

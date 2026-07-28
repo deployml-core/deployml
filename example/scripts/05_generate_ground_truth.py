@@ -2,6 +2,7 @@
 Step 5: Generate fake ground truth values for each prediction and store in BigQuery.
 In production this would be real outcomes (e.g. actual sale price) matched back to predictions.
 """
+
 import os
 import numpy as np
 from pathlib import Path
@@ -15,7 +16,7 @@ PROJECT = os.environ.get("BIGQUERY_PROJECT")
 if not PROJECT:
     raise SystemExit("BIGQUERY_PROJECT missing. Run `deployml get-urls` to write .env.")
 DATASET = os.getenv("BIGQUERY_DATASET", "mlops")
-NOISE   = 15000  # std dev of fake noise around predicted value
+NOISE = 15000  # std dev of fake noise around predicted value
 
 client = bigquery.Client(project=PROJECT)
 
@@ -28,12 +29,12 @@ predictions = list(client.query(query).result())
 print(f"✓ Found {len(predictions)} predictions to generate ground truth for")
 
 np.random.seed(0)
-now  = datetime.now(timezone.utc)
+now = datetime.now(timezone.utc)
 rows = [
     {
-        "entity_id":       row["entity_id"],
+        "entity_id": row["entity_id"],
         "event_timestamp": now.isoformat(),
-        "actual_value":    float(row["predicted_value"]) + np.random.normal(0, NOISE),
+        "actual_value": float(row["predicted_value"]) + np.random.normal(0, NOISE),
     }
     for row in predictions
 ]

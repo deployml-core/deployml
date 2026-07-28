@@ -47,9 +47,7 @@ def check_gcp_auth() -> bool:
         bool: True if authenticated, False otherwise.
     """
     try:
-        result = run_tool(
-            "gcloud", ["auth", "list"], capture_output=True, text=True
-        )
+        result = run_tool("gcloud", ["auth", "list"], capture_output=True, text=True)
         return "ACTIVE" in result.stdout
     except Exception:
         return False
@@ -59,8 +57,10 @@ def check_gcp_adc() -> bool:
     """Application Default Credentials are required by Terraform and client libs."""
     try:
         result = run_tool(
-            "gcloud", ["auth", "application-default", "print-access-token"],
-            capture_output=True, text=True,
+            "gcloud",
+            ["auth", "application-default", "print-access-token"],
+            capture_output=True,
+            text=True,
         )
         return result.returncode == 0
     except Exception:
@@ -72,7 +72,10 @@ def check_bq() -> bool:
         return False
     try:
         result = run_tool(
-            "bq", ["version"], capture_output=True, text=True,
+            "bq",
+            ["version"],
+            capture_output=True,
+            text=True,
         )
         return result.returncode == 0
     except Exception:
@@ -85,9 +88,12 @@ def get_terraform_version() -> Optional[tuple]:
         return None
     try:
         import json as _json
+
         result = run_tool(
-            "terraform", ["version", "-json"],
-            capture_output=True, text=True,
+            "terraform",
+            ["version", "-json"],
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0:
             return None
@@ -102,9 +108,10 @@ def validate_gcp_project(project_id: str) -> bool:
     """Verify project exists and active gcloud account can access it."""
     try:
         result = run_tool(
-            "gcloud", ["projects", "describe", project_id,
-                       "--format=value(projectId)"],
-            capture_output=True, text=True,
+            "gcloud",
+            ["projects", "describe", project_id, "--format=value(projectId)"],
+            capture_output=True,
+            text=True,
         )
         return result.returncode == 0 and result.stdout.strip() == project_id
     except Exception:
@@ -146,17 +153,22 @@ def get_missing_iam_roles(project_id: str, required_roles: list) -> list:
     """Return roles the active account lacks. roles/owner short-circuits to empty."""
     try:
         import json as _json
+
         account_result = run_tool(
-            "gcloud", ["config", "get-value", "account"],
-            capture_output=True, text=True,
+            "gcloud",
+            ["config", "get-value", "account"],
+            capture_output=True,
+            text=True,
         )
         account = account_result.stdout.strip()
         if not account:
             return list(required_roles)
 
         result = run_tool(
-            "gcloud", ["projects", "get-iam-policy", project_id, "--format=json"],
-            capture_output=True, text=True,
+            "gcloud",
+            ["projects", "get-iam-policy", project_id, "--format=json"],
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0:
             return list(required_roles)
@@ -181,7 +193,10 @@ def check_docker_daemon() -> bool:
         return False
     try:
         result = run_tool(
-            "docker", ["info"], capture_output=True, text=True,
+            "docker",
+            ["info"],
+            capture_output=True,
+            text=True,
         )
         return result.returncode == 0
     except Exception:
@@ -228,7 +243,7 @@ def copy_modules_to_workspace(
             tool_name = tool.get("name")
             if tool_name:
                 used_modules.add(tool_name)
-    
+
     # Add teardown module to used_modules if teardown is enabled
     if teardown_enabled:
         used_modules.add("teardown")
@@ -268,9 +283,7 @@ def copy_modules_to_workspace(
 
             # Copy only the specific deployment type if specified
             if deployment_type:
-                deployment_source = (
-                    module_path / "cloud" / cloud / deployment_type
-                )
+                deployment_source = module_path / "cloud" / cloud / deployment_type
                 if deployment_source.exists():
                     deployment_dest = (
                         dest_module_path / "cloud" / cloud / deployment_type
@@ -279,14 +292,10 @@ def copy_modules_to_workspace(
                     shutil.copytree(deployment_source, deployment_dest)
                 else:
                     # Fallback: copy entire module if specific deployment type doesn't exist
-                    shutil.copytree(
-                        module_path, dest_module_path, dirs_exist_ok=True
-                    )
+                    shutil.copytree(module_path, dest_module_path, dirs_exist_ok=True)
             else:
                 # Copy entire module if no deployment type specified
-                shutil.copytree(
-                    module_path, dest_module_path, dirs_exist_ok=True
-                )
+                shutil.copytree(module_path, dest_module_path, dirs_exist_ok=True)
 
 
 def bucket_exists(bucket_name: str, project_id: str) -> bool:
@@ -320,9 +329,7 @@ def generate_unique_bucket_name(base_name: str, project_id: str) -> str:
         str: A unique bucket name.
     """
     while True:
-        suffix = "".join(
-            random.choices(string.ascii_lowercase + string.digits, k=6)
-        )
+        suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
         new_name = f"{base_name}-{suffix}"
         if not bucket_exists(new_name, project_id):
             return new_name
@@ -403,7 +410,8 @@ def cleanup_cloud_sql_resources(terraform_dir: Path, project_id: str):
 
     try:
         result = run_tool(
-            "terraform", ["output", "-raw", "instance_connection_name"],
+            "terraform",
+            ["output", "-raw", "instance_connection_name"],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -415,10 +423,20 @@ def cleanup_cloud_sql_resources(terraform_dir: Path, project_id: str):
         parts = instance_connection_name.split(":")
         instance_name = parts[2] if len(parts) == 3 else instance_connection_name
 
-        print(f"🗄️  Restarting Cloud SQL instance to close active connections: {instance_name}")
+        print(
+            f"🗄️  Restarting Cloud SQL instance to close active connections: {instance_name}"
+        )
         run_tool(
-            "gcloud", ["sql", "instances", "restart", instance_name,
-                       "--project", project_id, "--quiet"],
+            "gcloud",
+            [
+                "sql",
+                "instances",
+                "restart",
+                instance_name,
+                "--project",
+                project_id,
+                "--quiet",
+            ],
             capture_output=True,
             text=True,
         )
@@ -453,7 +471,9 @@ def cleanup_terraform_files(terraform_dir: Path):
     print("✅ Cleanup completed")
 
 
-def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verbose=False):
+def run_terraform_with_loading_bar(
+    cmd, cwd, estimated_minutes, stack=None, verbose=False
+):
     """
     Run a subprocess command with a loading bar using rich.progress.
     Progress messages are based on the stack/resources from the YAML config if provided.
@@ -504,8 +524,13 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
     if verbose:
         with open(log_file, "w", encoding="utf-8", errors="replace") as f:
             process = subprocess.Popen(
-                cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                encoding="utf-8", errors="replace",
+                cmd,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
                 env=tf_env,
             )
             for line in iter(process.stdout.readline, ""):
@@ -540,16 +565,14 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
                 else:
                     # If we exceed estimated time, slowly approach 95%
                     excess_time = elapsed - estimated_seconds
-                    progress_percent = min(95, 85 + int(excess_time / 30))  # +1% per 30 seconds
+                    progress_percent = min(
+                        95, 85 + int(excess_time / 30)
+                    )  # +1% per 30 seconds
 
                 # Choose message based on progress
-                msg_idx = min(
-                    int(progress_percent / (100 / (n_msgs - 1))), n_msgs - 2
-                )
+                msg_idx = min(int(progress_percent / (100 / (n_msgs - 1))), n_msgs - 2)
                 message = resource_msgs[msg_idx]
-                progress.update(
-                    task, completed=progress_percent, description=message
-                )
+                progress.update(task, completed=progress_percent, description=message)
                 time.sleep(1)
 
             # Wait for process to fully complete and flush all output
@@ -560,7 +583,11 @@ def run_terraform_with_loading_bar(cmd, cwd, estimated_minutes, stack=None, verb
             if returncode == 0:
                 progress.update(task, completed=100, description=resource_msgs[-1])
             else:
-                progress.update(task, completed=progress_percent, description=f"⚠️ Terraform apply returned code {returncode}")
+                progress.update(
+                    task,
+                    completed=progress_percent,
+                    description=f"⚠️ Terraform apply returned code {returncode}",
+                )
 
             return returncode
         finally:
