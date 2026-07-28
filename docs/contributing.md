@@ -23,8 +23,15 @@ You can help improve the project in several ways:
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management, building, and publishing.
 
 - Install dependencies (including the `dev` group): `uv sync`
+- Set up the git hooks: `uv run pre-commit install` (wires up both the ruff and
+  commit-message hooks in one step)
 - Run the tests: `uv run pytest`
 - Build the package locally: `uv build`
+
+[ruff](https://docs.astral.sh/ruff/) runs on every commit and auto-fixes lint and
+formatting locally. CI runs the same checks in check-only mode, so a PR won't merge
+if anything is left unformatted. The commit-message hook rejects commits that don't
+follow the Conventional Commits format below.
 
 ## Releases and Commit Messages
 

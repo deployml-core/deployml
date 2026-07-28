@@ -49,10 +49,18 @@ source-exclude = [
 dev = [
     "pytest>=8",
     "python-semantic-release>=10,<11",
+    "pre-commit>=4",
+    "ruff==0.15.21",  # pinned to match .pre-commit-config.yaml so CI and the hook agree
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+# Defaults are fine for a student-contributor repo: lint set E + F, and the
+# black-compatible formatter. The pre-commit hook auto-fixes; CI only checks.
+# recycling_bin/ is archived dead code, left untouched.
+extend-exclude = ["recycling_bin"]
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
