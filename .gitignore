@@ -6,11 +6,8 @@ poetry.lock
 terraform.tfstate
 terraform.tfstate.backup
 .deployml
-
-data_local
-working_Version
-square_duckling 
-data/us_house_Sales_data.csv
+.pytest_cache/
+.ruff_cache/
 
 # MkDocs build output
 site/
@@ -22,7 +19,6 @@ config.yaml
 mlflow.db
 *.csv
 *.house_data
---source_format=PARQUET
 
 # Ignore .env file
 .venv/
@@ -30,5 +26,3 @@ mlflow.db
 .env/
 local/.env
 local/mlflow-artifacts/
-
-demo
