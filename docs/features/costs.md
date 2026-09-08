@@ -44,7 +44,20 @@ cost_analysis:
 
 A standard MLflow + FastAPI + Grafana deployment runs around **$34/month**, almost entirely Cloud SQL. Cloud Run, BigQuery, and GCS scale to zero and cost nothing at idle.
 
-## Keeping costs low
+- Cloud Run services cost $10-30 per month depending on traffic.  
+- Cloud SQL PostgreSQL ranges from $7/month for small instances to $25+ for production.  
+- Google Cloud Storage costs approximately $0.020 per GB per month.   
+- BigQuery storage costs $0.020 per GB per month with query costs based on data scanned.  
+- Cloud VMs cost approximately $25 per month for medium instances.   
+- GKE clusters have no management fee, but you pay for VM instances and load balancers. MLflow on GKE also provisions a small PersistentDisk for its data, a few cents per GB-month. Note that GKE can get expensive quickly.
 
-- Always `deployml destroy` when done — Cloud SQL bills continuously.
-- Use `backend_store_uri: sqlite` instead of `postgresql` during development to eliminate Cloud SQL entirely.
+
+
+## Cost Optimization
+
+Here are some tips to keep the costs low while you are learning:  
+
+- Use SQLite instead of Cloud SQL whenever possible, particularly for development purposes and when your data is small. Set `backend_store_uri: sqlite` instead of `postgresql` to eliminate the Cloud SQL instance entirely. The minikube and GKE MLflow paths already do this, sqlite on a PersistentVolumeClaim, so they avoid the always-on Cloud SQL cost.  
+- Always run `deployml destroy` when you are done — Cloud SQL bills continuously, whether or not anyone is using it.
+- Enable auto-teardown to prevent forgotten deployments. 
+- Use Cloud Run for variable workloads to take advantage of scale-to-zero pricing.

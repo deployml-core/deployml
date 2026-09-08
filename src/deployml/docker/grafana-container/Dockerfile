@@ -3,12 +3,11 @@ FROM grafana/grafana:10.4.5
 # Switch to root to copy files and change permissions
 USER root
 
-# Configure Grafana to listen on Cloud Run's expected port
-ENV GF_SERVER_HTTP_PORT=8080 \
-    GF_SECURITY_ADMIN_USER=admin \
-    GF_SECURITY_ADMIN_PASSWORD=admin
+# Server port only. Admin user and password come from Cloud Run env vars,
+# which Terraform wires from Secret Manager. No baked default credentials.
+ENV GF_SERVER_HTTP_PORT=8080
 
-# Copy entrypoint script and set permissions 
+# Copy entrypoint script and set permissions
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 755 /usr/local/bin/entrypoint.sh
 

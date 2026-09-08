@@ -1,5 +1,4 @@
 import json
-import subprocess
 from pathlib import Path
 from typing import Dict, Any, TYPE_CHECKING
 from datetime import datetime, timezone
@@ -10,6 +9,7 @@ if TYPE_CHECKING:
 
 from .urls import ServiceURLs
 from .display import display_services_table
+from deployml.utils.platform_compat import run_tool
 
 
 class DeploymentStack:
@@ -37,8 +37,8 @@ class DeploymentStack:
         """Extract URLs from Terraform outputs"""
         try:
             terraform_dir = self.workspace_dir / "terraform"
-            result = subprocess.run(
-                ["terraform", "output", "-json"],
+            result = run_tool(
+                "terraform", ["output", "-json"],
                 cwd=terraform_dir,
                 capture_output=True,
                 text=True,
@@ -130,8 +130,8 @@ class DeploymentStack:
         """
         try:
             terraform_dir = self.workspace_dir / "terraform"
-            result = subprocess.run(
-                ["terraform", "output", "-json"],
+            result = run_tool(
+                "terraform", ["output", "-json"],
                 cwd=terraform_dir,
                 capture_output=True,
                 text=True,
@@ -149,8 +149,8 @@ class DeploymentStack:
                     if show_credentials:
                         # Try to get the actual sensitive value
                         try:
-                            sensitive_result = subprocess.run(
-                                ["terraform", "output", "-raw", key],
+                            sensitive_result = run_tool(
+                                "terraform", ["output", "-raw", key],
                                 cwd=terraform_dir,
                                 capture_output=True,
                                 text=True,
@@ -326,8 +326,8 @@ class DeploymentStack:
         """Get detailed cron job information"""
         try:
             terraform_dir = self.workspace_dir / "terraform"
-            result = subprocess.run(
-                ["terraform", "output", "-json"],
+            result = run_tool(
+                "terraform", ["output", "-json"],
                 cwd=terraform_dir,
                 capture_output=True,
                 text=True,

@@ -38,7 +38,13 @@ variable "allow_public_access" {
 
 variable "metrics_connection_string" {
   type        = string
-  description = "Connection string for the metrics database"
+  description = "Connection string for the metrics database. Used only when metrics_connection_string_secret_id is empty."
+  default     = ""
+}
+
+variable "metrics_connection_string_secret_id" {
+  type        = string
+  description = "Secret Manager secret ID holding the Grafana metrics DSN. When set, GF_DATABASE_URL is sourced via value_from."
   default     = ""
 }
 

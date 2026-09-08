@@ -6,6 +6,13 @@ metadata:
     app: mlflow
 spec:
   replicas: {{ replicas }}
+  {% if use_pvc %}
+  # A ReadWriteOnce PVC (e.g. a GKE PersistentDisk) can attach to only one node
+  # at a time, so a RollingUpdate would deadlock: the new pod cannot mount until
+  # the old one releases. Recreate tears down the old pod first.
+  strategy:
+    type: Recreate
+  {% endif %}
   selector:
     matchLabels:
       app: mlflow
@@ -14,6 +21,12 @@ spec:
       labels:
         app: mlflow
     spec:
+      # The image runs as non-root user 'mlflow'. A freshly provisioned PVC is
+      # root-owned, so without fsGroup the server cannot write the sqlite db or
+      # artifacts and crashes with permission denied. fsGroup chowns the volume
+      # and is added as a supplementary group to the container process.
+      securityContext:
+        fsGroup: 1000
       containers:
       - name: mlflow
         image: {{ image }}
@@ -25,6 +38,10 @@ spec:
           value: "0.0.0.0"
         - name: MLFLOW_SERVER_PORT
           value: "{{ port }}"
+        # Allow Host header for service DNS, NodePort, LoadBalancer IP, etc.
+        # Without this MLflow 3.x rejects external requests with "Invalid Host header".
+        - name: MLFLOW_SERVER_ALLOWED_HOSTS
+          value: "*"
         {% if backend_store_uri %}
         - name: MLFLOW_BACKEND_STORE_URI
           value: "{{ backend_store_uri }}"
@@ -51,19 +68,33 @@ spec:
         volumeMounts:
         - name: mlflow-data
           mountPath: /mlflow-artifacts
+        startupProbe:
+          httpGet:
+            path: /health
+            port: {{ port }}
+          # MLflow 3.x boots huey consumers and other workers before /health responds.
+          # Allow up to 5 minutes (30 attempts * 10s) before declaring failure.
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 30
         livenessProbe:
           httpGet:
             path: /health
             port: {{ port }}
-          initialDelaySeconds: 30
-          periodSeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
         readinessProbe:
           httpGet:
             path: /health
             port: {{ port }}
-          initialDelaySeconds: 10
-          periodSeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
       volumes:
       - name: mlflow-data
+        {% if use_pvc %}
+        persistentVolumeClaim:
+          claimName: mlflow-data-pvc
+        {% else %}
         emptyDir: {}
+        {% endif %}
 

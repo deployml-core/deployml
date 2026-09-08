@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
+from deployml.utils.platform_compat import run_tool
+
 
 _RESOURCE_TYPE_LABELS = {
     "google_sql_database_instance": "Cloud SQL",
@@ -132,8 +134,8 @@ def _row_to_resource_cost(row: Dict) -> ResourceCost:
 
 def check_infracost_available() -> bool:
     try:
-        result = subprocess.run(
-            ["infracost", "--version"],
+        result = run_tool(
+            "infracost", ["--version"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -165,8 +167,8 @@ def run_infracost_scan(terraform_dir: Path) -> Optional[Dict]:
     ]
     for cmd in cmds:
         try:
-            result = subprocess.run(
-                cmd,
+            result = run_tool(
+                cmd[0], cmd[1:],
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -220,8 +222,8 @@ def run_infracost_scan_with_usage(
             "    usage_file: infracost-usage.yml\n"
             "    terraform_var_files: [terraform.tfvars]\n"
         )
-        result = subprocess.run(
-            ["infracost", "scan", "--json"],
+        result = run_tool(
+            "infracost", ["scan", "--json"],
             cwd=config_dir,
             capture_output=True,
             text=True,
@@ -254,9 +256,9 @@ def _run_inspect_rows(scan_json_path: Path) -> List[Dict]:
     concurrent scan of a different workspace could be reported here instead.
     """
     try:
-        result = subprocess.run(
+        result = run_tool(
+            "infracost",
             [
-                "infracost",
                 "inspect",
                 "--file",
                 str(scan_json_path),

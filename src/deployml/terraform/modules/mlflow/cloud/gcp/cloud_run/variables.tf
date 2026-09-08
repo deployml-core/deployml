@@ -52,7 +52,13 @@ variable "artifact_bucket" {
 # MLflow configuration
 variable "backend_store_uri" {
   type        = string
-  description = "URI for MLflow backend store (database)"
+  description = "URI for MLflow backend store (database). Used only when backend_store_uri_secret_id is empty."
+  default     = ""
+}
+
+variable "backend_store_uri_secret_id" {
+  type        = string
+  description = "Secret Manager secret ID holding the MLflow DSN. When set, the env var is sourced via value_from, keeping the password out of plain env."
   default     = ""
 }
 
@@ -85,6 +91,27 @@ variable "max_scale" {
   type        = number
   description = "Maximum number of container instances"
   default     = 10
+}
+
+# Keep at least one warm MLflow instance to avoid cold starts on the tracking
+# server, which makes the UI feel broken. Costs ~$5/mo per warm instance.
+# Override to 0 if you accept cold starts in exchange for zero idle cost.
+variable "min_instances" {
+  type        = number
+  description = "Minimum warm container instances. 1 avoids cold starts. 0 saves cost when idle."
+  default     = 1
+}
+
+variable "startup_probe_path" {
+  type        = string
+  description = "HTTP path used for the Cloud Run startup probe."
+  default     = "/health"
+}
+
+variable "request_timeout_seconds" {
+  type        = number
+  description = "Cloud Run request timeout. Long enough for MLflow log_artifact uploads and large queries."
+  default     = 1800
 }
 
 variable "container_concurrency" {

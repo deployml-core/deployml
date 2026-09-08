@@ -90,10 +90,27 @@ def log_prediction_to_bigquery(entity_id: str, predicted_value: float, model_ver
         print(f"⚠️  Could not log prediction to BigQuery: {e}")
 
 
+async def _model_load_retry_loop():
+    """Retry loading the model until it succeeds. Earlier code attempted
+    the load once at startup; if MLflow was unavailable then, the model
+    stayed None forever even after MLflow recovered."""
+    import asyncio
+    retry_interval = 30
+    while model is None:
+        ok = await asyncio.to_thread(load_model_from_mlflow)
+        if ok:
+            return
+        await asyncio.sleep(retry_interval)
+
+
 @app.on_event("startup")
 async def startup_event():
-    load_model_from_mlflow()
+    # Init BigQuery synchronously. Cheap, returns immediately if no project.
     init_bigquery()
+    # Load the model in a background task with retry so startup completes fast
+    # AND we keep trying if MLflow was unreachable at first.
+    import asyncio
+    asyncio.create_task(_model_load_retry_loop())
 
 
 @app.get("/")
@@ -111,11 +128,20 @@ async def root():
 @app.get("/health", response_model=HealthResponse)
 async def health():
     port = int(os.getenv("PORT", "8000"))
+    # Actually probe MLflow. Earlier code returned mlflow_connected=True
+    # hardcoded, which lied to users when MLflow was down.
+    mlflow_ok = False
+    try:
+        import requests as _rq
+        resp = _rq.get(f"{MLFLOW_TRACKING_URI.rstrip('/')}/health", timeout=2)
+        mlflow_ok = resp.status_code == 200
+    except Exception:
+        mlflow_ok = False
     return HealthResponse(
-        status="healthy",
-        timestamp=datetime.now().isoformat(),
+        status="healthy" if mlflow_ok else "degraded",
+        timestamp=datetime.now(timezone.utc).isoformat(),
         port=port,
-        mlflow_connected=True,
+        mlflow_connected=mlflow_ok,
         model_loaded=model is not None
     )
 
@@ -126,15 +152,18 @@ async def predict(request: PredictionRequest):
 
     entity_id = request.entity_id or str(uuid.uuid4())
 
+    # Do not lazy-load synchronously here. mlflow.pyfunc.load_model can hang
+    # for many seconds when MLflow is unreachable, blocking the request worker.
+    # The background loader started in startup_event handles loading. If the
+    # model is not yet loaded, return 503 fast.
     if model is None:
-        load_model_from_mlflow()
-
-    if model is None:
-        return PredictionResponse(
-            prediction=-1.0,
-            timestamp=datetime.now().isoformat(),
-            model_used=None,
-            entity_id=entity_id
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "Model not available yet. MLflow may be unreachable or no model is registered in Production stage. Retry shortly.",
+                "entity_id": entity_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
         )
 
     try:
@@ -148,16 +177,20 @@ async def predict(request: PredictionRequest):
 
         return PredictionResponse(
             prediction=prediction,
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             model_used=model_version,
             entity_id=entity_id
         )
     except Exception as e:
-        return PredictionResponse(
-            prediction=-1.0,
-            timestamp=datetime.now().isoformat(),
-            model_used=None,
-            entity_id=entity_id
+        # Earlier code returned prediction=-1.0 with HTTP 200 and no message,
+        # which silently hid model errors. Now we return 500 with the cause.
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": f"Prediction failed: {type(e).__name__}: {e}",
+                "entity_id": entity_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
         )
 
 

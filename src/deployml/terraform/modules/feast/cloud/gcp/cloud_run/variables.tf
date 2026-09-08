@@ -105,7 +105,7 @@ variable "container_concurrency" {
 variable "allow_public_access" {
   type        = bool
   description = "Whether to allow public access to the Feast service"
-  default     = true
+  default     = false
 }
 
 variable "cloudsql_instance_annotation" {

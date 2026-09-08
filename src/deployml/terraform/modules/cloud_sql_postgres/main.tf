@@ -17,10 +17,11 @@ resource "google_sql_database_instance" "postgres" {
       name  = "max_connections"
       value = var.max_connections
     }
+    # Public IP stays enabled so outputs that reference public_ip_address keep
+    # working, but no authorized_networks means no direct internet access.
+    # Cloud Run reaches the instance through the cloudsql-instances annotation,
+    # which tunnels via the Cloud SQL Auth Proxy and bypasses authorized_networks.
     ip_configuration {
-      authorized_networks {
-        value = "0.0.0.0/0"
-      }
       ipv4_enabled = true
     }
   }
@@ -28,20 +29,22 @@ resource "google_sql_database_instance" "postgres" {
   deletion_protection = false
 }
 
-# Wait for Cloud SQL instance to be fully ready before creating databases
-# Cloud SQL instances can take 2-5 minutes to become fully operational
-resource "time_sleep" "wait_for_instance" {
-  depends_on = [google_sql_database_instance.postgres]
-  create_duration = "180s"  # Wait 3 minutes for instance to be fully ready
-}
-
-# Additional check: Use a null_resource to verify instance is actually running
-# This helps catch cases where the instance exists but is stopped
+# Verify the instance is RUNNABLE before creating databases.
+# Previously paired with a fixed 180s sleep; the polling here makes the sleep
+# unnecessary and faster on the happy path.
 resource "null_resource" "verify_instance_running" {
-  depends_on = [time_sleep.wait_for_instance]
+  depends_on = [google_sql_database_instance.postgres]
   
   provisioner "local-exec" {
-    command = <<-EOT
+    # Run under bash explicitly. This script uses bash only syntax, set +e, brace
+    # expansion {1..30}, command -v, POSIX test brackets, sleep. On Windows the
+    # default local-exec shell is cmd.exe, which cannot parse any of it, so the
+    # provisioner would fail. bash is provided by Git for Windows or WSL. This is
+    # also a portability win on Ubuntu, where /bin/sh is dash and does not expand
+    # {1..30}. The script self-guards with command -v gcloud and always exits 0, so
+    # it degrades gracefully and never fails the deploy regardless of which bash.
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
       set +e
       echo "Checking Cloud SQL instance status..."
       if ! command -v gcloud &> /dev/null; then
@@ -118,6 +121,57 @@ resource "google_sql_user" "users" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# Secret Manager holds the full MLflow DSN so Cloud Run env vars do not carry
+# the DB password in plaintext. The Cloud Run runtime SA reads it at start.
+data "google_project" "current" {}
+
+resource "google_secret_manager_secret" "mlflow_dsn" {
+  project   = var.project_id
+  secret_id = "${var.db_instance_name}-mlflow-dsn"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "mlflow_dsn" {
+  secret      = google_secret_manager_secret.mlflow_dsn.id
+  secret_data = "postgresql+psycopg2://${var.db_user}:${urlencode(random_password.db_password.result)}@/${var.db_name}?host=/cloudsql/${google_sql_database_instance.postgres.connection_name}"
+  depends_on  = [google_sql_user.users]
+}
+
+resource "google_secret_manager_secret_iam_member" "mlflow_dsn_access" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.mlflow_dsn.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+# Same pattern for the Grafana metrics DSN so Grafana's GF_DATABASE_URL env
+# does not carry the DB password in plaintext.
+resource "google_secret_manager_secret" "grafana_metrics_dsn" {
+  count     = var.create_metrics_db ? 1 : 0
+  project   = var.project_id
+  secret_id = "${var.db_instance_name}-grafana-metrics-dsn"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "grafana_metrics_dsn" {
+  count       = var.create_metrics_db ? 1 : 0
+  secret      = google_secret_manager_secret.grafana_metrics_dsn[0].id
+  secret_data = "postgres://${var.db_user}:${random_password.db_password.result}@/metrics?host=/cloudsql/${google_sql_database_instance.postgres.connection_name}&sslmode=disable"
+  depends_on  = [google_sql_database.metrics_db]
+}
+
+resource "google_secret_manager_secret_iam_member" "grafana_metrics_dsn_access" {
+  count     = var.create_metrics_db ? 1 : 0
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.grafana_metrics_dsn[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
 }
 
 resource "google_project_service" "required" {

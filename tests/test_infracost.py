@@ -36,18 +36,18 @@ from deployml.utils.usage_profiles import LIGHT, render_usage_yaml
 # ---------------------------------------------------------------------------
 
 def test_check_infracost_available_returns_true():
-    with patch("deployml.utils.infracost.subprocess.run") as mock_run:
+    with patch("deployml.utils.infracost.run_tool") as mock_run:
         mock_run.return_value = SimpleNamespace(returncode=0, stdout="infracost v2.4.2", stderr="")
         assert check_infracost_available() is True
 
 
 def test_check_infracost_available_returns_false_when_not_installed():
-    with patch("deployml.utils.infracost.subprocess.run", side_effect=FileNotFoundError):
+    with patch("deployml.utils.infracost.run_tool", side_effect=FileNotFoundError):
         assert check_infracost_available() is False
 
 
 def test_check_infracost_available_returns_false_on_nonzero_returncode():
-    with patch("deployml.utils.infracost.subprocess.run") as mock_run:
+    with patch("deployml.utils.infracost.run_tool") as mock_run:
         mock_run.return_value = SimpleNamespace(returncode=1, stdout="", stderr="error")
         assert check_infracost_available() is False
 
@@ -173,11 +173,14 @@ def test_fetch_resource_costs_passes_file_flag_to_inspect(tmp_path):
     # inspect must be pinned to the scan JSON we pass, via --file.
     scan_json = tmp_path / "infracost-scan.json"
     scan_json.write_text("{}")
-    with patch("deployml.utils.infracost.subprocess.run") as mock_run:
+    with patch("deployml.utils.infracost.run_tool") as mock_run:
         mock_run.return_value = SimpleNamespace(returncode=0, stdout="[]", stderr="")
         fetch_resource_costs(scan_json)
-        argv = mock_run.call_args[0][0]
-    assert argv[:2] == ["infracost", "inspect"]
+        tool, argv = mock_run.call_args[0][0], mock_run.call_args[0][1]
+    # run_tool resolves the tool name to a real path, so the name is passed
+    # separately from the args rather than as argv[0].
+    assert tool == "infracost"
+    assert argv[0] == "inspect"
     assert "--file" in argv
     assert argv[argv.index("--file") + 1] == str(scan_json)
 
@@ -189,7 +192,7 @@ def test_fetch_resource_costs_accumulates_duplicate_resource_types(tmp_path):
         {"cost": "3.00", "columns": {"resource": "module.b.google_cloud_run_v2_service.y"}},
         {"cost": "0", "columns": {"resource": "module.c.google_storage_bucket.z"}},
     ]
-    with patch("deployml.utils.infracost.subprocess.run") as mock_run:
+    with patch("deployml.utils.infracost.run_tool") as mock_run:
         mock_run.return_value = SimpleNamespace(
             returncode=0, stdout=json.dumps(rows), stderr=""
         )

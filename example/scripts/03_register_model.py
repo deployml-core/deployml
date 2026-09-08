@@ -3,12 +3,15 @@ Step 3: Register the best MLflow run as HousingPriceModel and promote to Product
 """
 import os
 import mlflow
+from pathlib import Path
 from mlflow.tracking import MlflowClient
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path.cwd() / ".env")
 
-MLFLOW_URL  = os.environ["MLFLOW_URL"]
+MLFLOW_URL = os.environ.get("MLFLOW_URL")
+if not MLFLOW_URL:
+    raise SystemExit("MLFLOW_URL missing. Run `deployml get-urls` to write .env.")
 MODEL_NAME  = "HousingPriceModel"
 EXPERIMENT  = "housing-price-prediction"
 

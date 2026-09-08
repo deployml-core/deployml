@@ -8,20 +8,43 @@ The dashboard shows:
 - MAE over time
 
 Prerequisites: Grafana must be running and accessible at GRAFANA_URL.
-Default credentials: admin / admin (change on first login).
+Auth: the admin password lives in Secret Manager. This script fetches it via
+gcloud using GRAFANA_ADMIN_PASSWORD_SECRET_ID from .env (run `deployml get-urls`).
+Override by exporting GRAFANA_PASSWORD if you prefer.
 """
 import os
 import json
+import subprocess
 import requests
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path.cwd() / ".env")
 
-GRAFANA_URL  = os.environ["GRAFANA_URL"].rstrip("/")
+GRAFANA_URL = os.environ.get("GRAFANA_URL")
+PROJECT     = os.environ.get("BIGQUERY_PROJECT")
+if not GRAFANA_URL or not PROJECT:
+    raise SystemExit("GRAFANA_URL or BIGQUERY_PROJECT missing. Run `deployml get-urls` to write .env.")
+GRAFANA_URL = GRAFANA_URL.rstrip("/")
+DATASET = os.getenv("BIGQUERY_DATASET", "mlops")
 GRAFANA_USER = os.getenv("GRAFANA_USER", "admin")
-GRAFANA_PASS = os.getenv("GRAFANA_PASSWORD", "admin")
-PROJECT      = os.environ["BIGQUERY_PROJECT"]
-DATASET      = os.getenv("BIGQUERY_DATASET", "mlops")
+
+GRAFANA_PASS = os.getenv("GRAFANA_PASSWORD")
+if not GRAFANA_PASS:
+    secret_id = os.environ.get("GRAFANA_ADMIN_PASSWORD_SECRET_ID")
+    if not secret_id:
+        raise SystemExit(
+            "Grafana password not available. Either export GRAFANA_PASSWORD, "
+            "or run `deployml get-urls` so .env has GRAFANA_ADMIN_PASSWORD_SECRET_ID."
+        )
+    proc = subprocess.run(
+        ["gcloud", "secrets", "versions", "access", "latest",
+         "--secret", secret_id, "--project", PROJECT],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(f"Failed to fetch Grafana password: {proc.stderr.strip()}")
+    GRAFANA_PASS = proc.stdout.strip()
 
 session = requests.Session()
 session.auth = (GRAFANA_USER, GRAFANA_PASS)

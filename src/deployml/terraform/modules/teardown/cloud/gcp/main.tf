@@ -40,22 +40,24 @@ resource "google_service_account" "teardown" {
   project      = var.project_id
 }
 
-# Grant permissions to service account
+# Grant teardown permissions. Narrowed scope: removed
+# roles/resourcemanager.projectIamAdmin because deleting resources does not
+# require IAM modification rights, and granting it is a project-wide
+# escalation risk if the SA is ever compromised.
 resource "google_project_iam_member" "teardown_permissions" {
   for_each = toset([
-    "roles/run.admin",                    # To destroy Cloud Run services and jobs
-    "roles/compute.instanceAdmin.v1",     # To destroy VMs
-    "roles/storage.admin",                # To destroy storage buckets
-    "roles/cloudsql.admin",               # To destroy Cloud SQL instances
-    "roles/iam.serviceAccountUser",       # To use service accounts
-    "roles/resourcemanager.projectIamAdmin", # To clean up IAM bindings
-    "roles/storage.objectAdmin",          # To read/write files in GCS
-    "roles/secretmanager.secretAccessor",  # To access secrets
-    "roles/pubsub.admin",                 # To delete Pub/Sub topics
-    "roles/cloudscheduler.admin",         # To delete scheduler jobs
-    "roles/cloudbuild.builds.builder"     # To delete Cloud Build triggers (if any exist from old deployments)
+    "roles/run.admin",                  # Destroy Cloud Run services and jobs
+    "roles/compute.instanceAdmin.v1",   # Destroy VMs
+    "roles/storage.admin",              # Destroy storage buckets
+    "roles/cloudsql.admin",             # Destroy Cloud SQL instances
+    "roles/iam.serviceAccountUser",     # Use service accounts
+    "roles/storage.objectAdmin",        # Read/write files in GCS
+    "roles/secretmanager.secretAccessor", # Access secrets
+    "roles/pubsub.admin",               # Delete Pub/Sub topics
+    "roles/cloudscheduler.admin",       # Delete scheduler jobs
+    "roles/cloudbuild.builds.builder"   # Delete Cloud Build triggers from old deployments
   ])
-  
+
   project = var.project_id
   role    = each.value
   member  = "serviceAccount:${google_service_account.teardown.email}"

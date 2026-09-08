@@ -49,4 +49,18 @@ REQUIRED_GCP_APIS = [
     "logging.googleapis.com",
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
+    "secretmanager.googleapis.com",
+    "container.googleapis.com",  # GKE clusters. Free to enable, only billed when a cluster exists.
+]
+
+# Minimum project-level roles to deploy the full stack. roles/owner satisfies all.
+REQUIRED_GCP_IAM_ROLES = [
+    "roles/serviceusage.serviceUsageAdmin",
+    "roles/artifactregistry.admin",
+    "roles/cloudsql.admin",
+    "roles/run.admin",
+    "roles/storage.admin",
+    "roles/bigquery.admin",
+    "roles/iam.serviceAccountAdmin",
+    "roles/iam.serviceAccountUser",
 ]
