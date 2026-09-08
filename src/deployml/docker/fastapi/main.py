@@ -12,7 +12,7 @@ import mlflow.pyfunc
 app = FastAPI(
     title="FastAPI Demo",
     description="Simple FastAPI application for Kubernetes deployment demo",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow-service:5000")
@@ -23,7 +23,15 @@ BIGQUERY_DATASET = os.getenv("BIGQUERY_DATASET", "mlops")
 model = None
 bq_client = None
 
-FEATURE_ORDER = ['bedrooms', 'bathrooms', 'area_sqft', 'lot_size', 'year_built', 'city', 'state']
+FEATURE_ORDER = [
+    "bedrooms",
+    "bathrooms",
+    "area_sqft",
+    "lot_size",
+    "year_built",
+    "city",
+    "state",
+]
 
 
 class PredictionRequest(BaseModel):
@@ -65,6 +73,7 @@ def init_bigquery():
         return
     try:
         from google.cloud import bigquery
+
         bq_client = bigquery.Client(project=BIGQUERY_PROJECT)
         print(f"✓ BigQuery client initialized for project {BIGQUERY_PROJECT}")
     except Exception as e:
@@ -72,7 +81,9 @@ def init_bigquery():
         bq_client = None
 
 
-def log_prediction_to_bigquery(entity_id: str, predicted_value: float, model_version: str):
+def log_prediction_to_bigquery(
+    entity_id: str, predicted_value: float, model_version: str
+):
     if bq_client is None:
         return
     try:
@@ -95,6 +106,7 @@ async def _model_load_retry_loop():
     the load once at startup; if MLflow was unavailable then, the model
     stayed None forever even after MLflow recovered."""
     import asyncio
+
     retry_interval = 30
     while model is None:
         ok = await asyncio.to_thread(load_model_from_mlflow)
@@ -110,6 +122,7 @@ async def startup_event():
     # Load the model in a background task with retry so startup completes fast
     # AND we keep trying if MLflow was unreachable at first.
     import asyncio
+
     asyncio.create_task(_model_load_retry_loop())
 
 
@@ -121,7 +134,7 @@ async def root():
         "model_loaded": model is not None,
         "model_name": MODEL_NAME,
         "mlflow_uri": MLFLOW_TRACKING_URI,
-        "endpoints": {"health": "/health", "predict": "/predict", "docs": "/docs"}
+        "endpoints": {"health": "/health", "predict": "/predict", "docs": "/docs"},
     }
 
 
@@ -133,6 +146,7 @@ async def health():
     mlflow_ok = False
     try:
         import requests as _rq
+
         resp = _rq.get(f"{MLFLOW_TRACKING_URI.rstrip('/')}/health", timeout=2)
         mlflow_ok = resp.status_code == 200
     except Exception:
@@ -142,7 +156,7 @@ async def health():
         timestamp=datetime.now(timezone.utc).isoformat(),
         port=port,
         mlflow_connected=mlflow_ok,
-        model_loaded=model is not None
+        model_loaded=model is not None,
     )
 
 
@@ -179,7 +193,7 @@ async def predict(request: PredictionRequest):
             prediction=prediction,
             timestamp=datetime.now(timezone.utc).isoformat(),
             model_used=model_version,
-            entity_id=entity_id
+            entity_id=entity_id,
         )
     except Exception as e:
         # Earlier code returned prediction=-1.0 with HTTP 200 and no message,
@@ -196,5 +210,6 @@ async def predict(request: PredictionRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run(app, host="0.0.0.0", port=port)

@@ -120,7 +120,9 @@ def find_windows_bash() -> "str | None":
     for base in (program_files, program_files_x86):
         candidates.append(os.path.join(base, "Git", "bin", "bash.exe"))
     if local_appdata:
-        candidates.append(os.path.join(local_appdata, "Programs", "Git", "bin", "bash.exe"))
+        candidates.append(
+            os.path.join(local_appdata, "Programs", "Git", "bin", "bash.exe")
+        )
     for path in candidates:
         if path and os.path.isfile(path):
             return path
@@ -176,6 +178,7 @@ def robust_rmtree(path) -> None:
     raises PermissionError. The error handler clears the read only bit and retries,
     then pauses briefly and retries once more before giving up.
     """
+
     def _handle(func, target, _exc):
         try:
             os.chmod(target, stat.S_IWRITE)

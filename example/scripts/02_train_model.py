@@ -1,6 +1,7 @@
 """
 Step 2: Pull features from BigQuery and train a RandomForest model, logging to MLflow.
 """
+
 import os
 import numpy as np
 import mlflow
@@ -16,18 +17,28 @@ from dotenv import load_dotenv
 load_dotenv(Path.cwd() / ".env")
 
 MLFLOW_URL = os.environ.get("MLFLOW_URL")
-PROJECT    = os.environ.get("BIGQUERY_PROJECT")
+PROJECT = os.environ.get("BIGQUERY_PROJECT")
 if not MLFLOW_URL or not PROJECT:
-    raise SystemExit("MLFLOW_URL or BIGQUERY_PROJECT missing. Run `deployml get-urls` to write .env.")
-DATASET        = os.getenv("BIGQUERY_DATASET", "mlops")
-EXPERIMENT     = "housing-price-prediction"
-FEATURE_COLS   = ["bedrooms", "bathrooms", "area_sqft", "lot_size", "year_built", "city", "state"]
+    raise SystemExit(
+        "MLFLOW_URL or BIGQUERY_PROJECT missing. Run `deployml get-urls` to write .env."
+    )
+DATASET = os.getenv("BIGQUERY_DATASET", "mlops")
+EXPERIMENT = "housing-price-prediction"
+FEATURE_COLS = [
+    "bedrooms",
+    "bathrooms",
+    "area_sqft",
+    "lot_size",
+    "year_built",
+    "city",
+    "state",
+]
 
 # Pull features from BigQuery
 print(f"Querying BigQuery {PROJECT}.{DATASET}.offline_features ...")
 client = bigquery.Client(project=PROJECT)
-query  = f"SELECT {', '.join(FEATURE_COLS)} FROM `{PROJECT}.{DATASET}.offline_features`"
-df     = client.query(query).to_dataframe()
+query = f"SELECT {', '.join(FEATURE_COLS)} FROM `{PROJECT}.{DATASET}.offline_features`"
+df = client.query(query).to_dataframe()
 print(f"✓ Loaded {len(df)} rows from BigQuery")
 
 # Generate target (same formula as seed_model.py)
@@ -42,7 +53,9 @@ df["price"] = (
 
 X = df[FEATURE_COLS]
 y = df["price"]
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
 
 print(f"Connecting to MLflow at {MLFLOW_URL} ...")
 mlflow.set_tracking_uri(MLFLOW_URL)
@@ -56,8 +69,8 @@ with mlflow.start_run():
     model.fit(X_train, y_train)
 
     preds = model.predict(X_test)
-    rmse  = root_mean_squared_error(y_test, preds)
-    r2    = r2_score(y_test, preds)
+    rmse = root_mean_squared_error(y_test, preds)
+    r2 = r2_score(y_test, preds)
 
     print("Logging to MLflow ...")
     mlflow.log_params(params)

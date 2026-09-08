@@ -1,7 +1,7 @@
 
 [project]
 name = "deployml-core"
-version = "0.0.42"
+version = "0.0.60"
 description = "Infra for academia"
 authors = [
     {name = "Drew Hoang", email = "codentell@gmail.com"},
@@ -27,14 +27,49 @@ dependencies = [
 [project.scripts]
 deployml = "deployml.cli.cli:main"
 
-[tool.poetry]
-packages = [{include = "deployml", from = "src"}]
-include = [
-  { path = "src/deployml/docker/**/*", format = ["sdist", "wheel"] },
-  { path = "src/deployml/templates/**/*", format = ["sdist", "wheel"] },
-  { path = "src/deployml/terraform/**/*", format = ["sdist", "wheel"] }
+[build-system]
+requires = ["uv_build>=0.8,<0.9"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Distribution is "deployml-core" but the import package is "deployml".
+module-root = "src"
+module-name = "deployml"
+# Keep local Terraform artifacts out of the sdist/wheel (they are gitignored but
+# uv_build packages the working tree, not just tracked files).
+source-exclude = [
+    "**/.terraform",
+    "**/.terraform/**",
+    "**/.terraform.lock.hcl",
+    "**/*.tfstate",
+    "**/*.tfstate.backup",
 ]
 
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "python-semantic-release>=10,<11",
+    "pre-commit>=4",
+    "ruff==0.15.21",  # pinned to match .pre-commit-config.yaml so CI and the hook agree
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# Defaults are fine for a student-contributor repo: lint set E + F, and the
+# black-compatible formatter. The pre-commit hook auto-fixes; CI only checks.
+# recycling_bin/ is archived dead code, left untouched.
+extend-exclude = ["recycling_bin"]
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+allow_zero_version = true
+build_command = """
+uv lock --upgrade-package "$PACKAGE_NAME"
+git add uv.lock
+uv build
+"""
+
+[tool.semantic_release.branches.main]
+match = "main"

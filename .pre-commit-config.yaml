@@ -1,0 +1,19 @@
+# Install with: uv run pre-commit install
+# Installs both the pre-commit (ruff) and commit-msg (commitizen) hooks.
+default_install_hook_types: [pre-commit, commit-msg]
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version. Keep in sync with the dev-group ruff pin in pyproject.toml.
+    rev: v0.15.21
+    hooks:
+      # Run the linter.
+      - id: ruff-check
+        args: [ --fix ]
+      # Run the formatter.
+      - id: ruff-format
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.10.1
+    hooks:
+      # Validate Conventional Commit messages (semantic-release parses these).
+      - id: commitizen
+        stages: [commit-msg]

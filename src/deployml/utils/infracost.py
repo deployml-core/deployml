@@ -51,7 +51,8 @@ def check_infracost_available() -> bool:
     """
     try:
         result = run_tool(
-            "infracost", ["--version"],
+            "infracost",
+            ["--version"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -65,7 +66,9 @@ def check_infracost_available() -> bool:
         return False
 
 
-def run_infracost_breakdown(terraform_dir: Path, usage_file: Optional[Path] = None) -> Optional[Dict]:
+def run_infracost_breakdown(
+    terraform_dir: Path, usage_file: Optional[Path] = None
+) -> Optional[Dict]:
     """
     Run infracost breakdown analysis on the terraform directory.
 
@@ -92,7 +95,8 @@ def run_infracost_breakdown(terraform_dir: Path, usage_file: Optional[Path] = No
             cmd.extend(["--usage-file", str(usage_file)])
 
         result = run_tool(
-            cmd[0], cmd[1:],
+            cmd[0],
+            cmd[1:],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -167,9 +171,7 @@ def parse_infracost_data(data: Dict) -> Optional[CostAnalysis]:
             total_hourly_cost=float(data.get("totalHourlyCost", 0)),
             currency=data.get("currency", "USD"),
             resources=resources,
-            detected_resources=data.get("summary", {}).get(
-                "totalDetectedResources", 0
-            ),
+            detected_resources=data.get("summary", {}).get("totalDetectedResources", 0),
             supported_resources=data.get("summary", {}).get(
                 "totalSupportedResources", 0
             ),
@@ -205,9 +207,7 @@ def display_cost_breakdown(
         ),
         bold=True,
     )
-    typer.echo(
-        f"Hourly Cost:  ${analysis.total_hourly_cost:.4f} {analysis.currency}"
-    )
+    typer.echo(f"Hourly Cost:  ${analysis.total_hourly_cost:.4f} {analysis.currency}")
     typer.echo(
         f"Resources: {analysis.supported_resources} supported, {analysis.detected_resources} total"
     )
@@ -242,14 +242,10 @@ def display_cost_breakdown(
 
                 # Show top cost components
                 if resource.components:
-                    for component in resource.components[
-                        :3
-                    ]:  # Show top 3 components
+                    for component in resource.components[:3]:  # Show top 3 components
                         if component.monthly_cost > 0:
                             usage_note = (
-                                " (usage-based)"
-                                if component.usage_based
-                                else ""
+                                " (usage-based)" if component.usage_based else ""
                             )
                             typer.echo(
                                 f"    └─ {component.name}: ${component.monthly_cost:.2f}{usage_note}"
@@ -257,9 +253,7 @@ def display_cost_breakdown(
 
     # Usage-based resources note
     usage_based_resources = [
-        r
-        for r in analysis.resources
-        if any(c.usage_based for c in r.components)
+        r for r in analysis.resources if any(c.usage_based for c in r.components)
     ]
 
     if usage_based_resources:
@@ -287,7 +281,9 @@ def format_cost_for_confirmation(monthly_cost: float, currency: str) -> str:
 
 
 def run_infracost_analysis(
-    terraform_dir: Path, warning_threshold: float = 100.0, usage_file: Optional[Path] = None
+    terraform_dir: Path,
+    warning_threshold: float = 100.0,
+    usage_file: Optional[Path] = None,
 ) -> Optional[CostAnalysis]:
     """
     Run complete infracost analysis workflow.
@@ -301,9 +297,7 @@ def run_infracost_analysis(
     """
     # Check if infracost is available
     if not check_infracost_available():
-        typer.echo(
-            "💡 Tip: Install infracost CLI for cost analysis before deployment"
-        )
+        typer.echo("💡 Tip: Install infracost CLI for cost analysis before deployment")
         typer.echo("   Visit: https://www.infracost.io/docs/#quick-start")
         return None
 
