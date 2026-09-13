@@ -63,4 +63,6 @@ REQUIRED_GCP_IAM_ROLES = [
     "roles/bigquery.admin",
     "roles/iam.serviceAccountAdmin",
     "roles/iam.serviceAccountUser",
+    # deployml costs reads real usage from Cloud Monitoring to price the deployment.
+    "roles/monitoring.viewer",
 ]

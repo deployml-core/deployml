@@ -27,3 +27,8 @@ stack:
       name: grafana
       params:
         service_name: grafana-server
+
+# Optional. Controls the cost commands and the estimate shown before a deploy.
+# cost_analysis:
+#   enabled: true            # show a cost estimate in the deploy confirmation
+#   warning_threshold: 100.0 # warn in USD/month above this figure

@@ -46,8 +46,8 @@ from deployml.utils.platform_compat import run_tool, resolve_tool, configure_con
 from deployml.utils.infracost import (
     check_infracost_available,
     check_infracost_authenticated,
-    run_infracost_analysis,
     run_estimate_analysis,
+    run_actual_cost_analysis,
     format_cost_for_confirmation,
 )
 from deployml.utils.teardown import (
@@ -973,8 +973,24 @@ def costs(
     config_path: Path = typer.Option(
         Path("config.yaml"), "--config-path", "-c", help="Path to YAML config file"
     ),
+    days: int = typer.Option(
+        30, "--days", "-d",
+        help="How many days of real usage to measure (1-90).",
+    ),
 ):
-    """Show the monthly cost of your currently running deployment."""
+    """
+    Show what your running deployment actually costs, from real GCP usage.
+
+    Where `deployml estimate` prices a stack that does not exist yet and has to
+    assume how hard you will use it, this reads your real usage out of Cloud
+    Monitoring -- requests served, bytes stored, bytes scanned -- and prices
+    that. Use it to see whether the estimate was right and where your money is
+    actually going.
+    """
+    if days < 1 or days > 90:
+        typer.echo(" --days must be between 1 and 90.")
+        raise typer.Exit(code=1)
+
     if not check_infracost_available():
         typer.echo(" Infracost is not installed.")
         typer.echo("   Install: https://www.infracost.io/docs/#quick-start")
@@ -989,18 +1005,67 @@ def costs(
         typer.echo(f" Config file not found: {config_path}")
         raise typer.Exit(code=1)
 
-    config = yaml.safe_load(config_path.read_text())
-    workspace_name = config.get("name") or "development"
-    terraform_dir = Path.cwd() / ".deployml" / workspace_name / "terraform"
+    config = _load_config_or_exit(config_path)
+
+    try:
+        project_id = config["provider"]["project_id"]
+    except (KeyError, TypeError):
+        typer.echo(" Config is missing provider.project_id.")
+        raise typer.Exit(code=1)
+
+    # Measured usage comes from the Monitoring REST API, which authenticates with
+    # Application Default Credentials rather than the gcloud user login.
+    if not check_gcp_adc():
+        typer.echo(" Application Default Credentials are not configured.")
+        typer.echo("   Run: gcloud auth application-default login")
+        raise typer.Exit(code=1)
+
+    # Matches the workspace name deploy/destroy/get-urls use. This previously
+    # defaulted to "development", so costs looked in a directory deploy never wrote.
+    workspace_name = config.get("name") or "default"
+    deployml_dir = Path.cwd() / ".deployml" / workspace_name
+    terraform_dir = deployml_dir / "terraform"
 
     if not terraform_dir.exists():
         typer.echo(f" No deployment found at {terraform_dir}")
         typer.echo("   Run 'deployml deploy' to deploy, or 'deployml estimate' for a pre-deploy cost prediction.")
         raise typer.Exit(code=1)
 
+    # How long the stack has existed, so we can project what it has cost so far.
+    # Only written when auto-teardown is enabled, so treat it as optional.
+    from datetime import datetime as _datetime, timezone as _timezone
+
+    deployed_days = None
+    metadata = load_deployment_metadata(deployml_dir)
+    if metadata and metadata.get("deployed_at"):
+        try:
+            deployed_at = _datetime.fromisoformat(metadata["deployed_at"])
+            if deployed_at.tzinfo is None:
+                deployed_at = deployed_at.replace(tzinfo=_timezone.utc)
+            elapsed = _datetime.now(_timezone.utc) - deployed_at
+            deployed_days = max(elapsed.total_seconds() / 86400.0, 0.0)
+        except (ValueError, TypeError):
+            deployed_days = None
+
+    # Measuring a window longer than the deployment has existed would divide real
+    # usage across days that never happened and understate the run-rate.
+    if deployed_days is not None and 0 < deployed_days < days:
+        typer.secho(
+            f" Deployment is only {deployed_days:.1f} days old; "
+            f"measuring that window instead of {days} days.",
+            fg=typer.colors.YELLOW,
+        )
+        days = max(deployed_days, 1.0 / 24.0)
+
     warning_threshold = config.get("cost_analysis", {}).get("warning_threshold", 100.0)
-    typer.echo(f" Checking costs for running deployment: {workspace_name}")
-    analysis = run_infracost_analysis(terraform_dir, warning_threshold, show_resources=True)
+    analysis = run_actual_cost_analysis(
+        terraform_dir,
+        project_id=project_id,
+        workspace_name=workspace_name,
+        days=days,
+        warning_threshold=warning_threshold,
+        deployed_days=deployed_days,
+    )
 
     if analysis is None:
         typer.secho(" Cost check unavailable.", fg=typer.colors.YELLOW)
@@ -1489,7 +1554,20 @@ def deploy(
 
     cost_analysis = None
     if cost_enabled:
-        cost_analysis = run_infracost_analysis(DEPLOYML_TERRAFORM_DIR, warning_threshold)
+        # Infracost is optional, so a missing or unauthenticated install skips the
+        # estimate rather than blocking the deploy.
+        if check_infracost_available() and check_infracost_authenticated():
+            cost_analysis = run_estimate_analysis(
+                DEPLOYML_TERRAFORM_DIR,
+                profile_name="light",
+                warning_threshold=warning_threshold,
+            )
+        else:
+            typer.secho(
+                " Skipping cost estimate (infracost not installed or not authenticated).",
+                fg=typer.colors.YELLOW,
+            )
+            typer.echo("   Install: https://www.infracost.io/docs/#quick-start")
 
     # Format confirmation message with cost information
     if cost_analysis:

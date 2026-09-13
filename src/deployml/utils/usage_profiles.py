@@ -11,6 +11,9 @@ Field names below are the exact keys infracost expects for each resource type
 (see infracost's usage-file schema). To tune assumptions, edit the numbers here.
 """
 
+import math
+from typing import Dict, Optional, Tuple
+
 # A typical student demo: clicking around the UIs + running the example serving
 # script a few times over a month. Small storage, light query volume.
 LIGHT = {
@@ -65,17 +68,66 @@ def get_profile(name: str) -> dict:
     return PROFILES.get(name, LIGHT)
 
 
-def render_usage_yaml(profile: dict) -> str:
+def render_usage_yaml(
+    profile: Dict,
+    resource_usage: Optional[Dict[str, Dict[str, float]]] = None,
+) -> str:
     """
-    Render a usage profile into an infracost-usage.yml document.
+    Render an infracost-usage.yml document.
 
-    Uses `resource_type_default_usage`, which applies the same assumptions to
-    every resource of a given type (e.g. all three Cloud Run services), which is
-    exactly what a coarse light/heavy profile wants.
+    Two sections, either of which may be omitted:
+
+    - `resource_type_default_usage` applies one assumption to every resource of a
+      type, so all three Cloud Run services get the same request count. That is
+      what a coarse light/heavy *estimate* wants.
+    - `resource_usage` pins usage to a single terraform address. That is what
+      measured usage needs: real numbers differ per service, and a type default
+      would charge every service the whole deployment's total.
+
+    Per-address entries win over type defaults, which is why `deployml costs`
+    passes an empty profile plus measured `resource_usage`: anything it could not
+    measure then stays at infracost's zero default instead of being invented.
+
+    Values are formatted straight into YAML, so only scalars are supported.
     """
-    lines = ["version: 0.1", "resource_type_default_usage:"]
-    for resource_type, fields in profile.items():
-        lines.append(f"  {resource_type}:")
-        for key, value in fields.items():
-            lines.append(f"    {key}: {value}")
+    lines = ["version: 0.1"]
+
+    if profile:
+        lines.append("resource_type_default_usage:")
+        for resource_type, fields in profile.items():
+            lines.append(f"  {resource_type}:")
+            for key, value in fields.items():
+                lines.append(f"    {key}: {value}")
+
+    if resource_usage:
+        lines.append("resource_usage:")
+        for address, fields in resource_usage.items():
+            # Addresses contain dots and brackets, so they need quoting.
+            lines.append(f'  "{address}":')
+            for key, value in fields.items():
+                lines.append(f"    {key}: {value}")
+
     return "\n".join(lines) + "\n"
+
+
+def classify_usage_profile(monthly_requests: float) -> Tuple[str, float]:
+    """
+    Label measured usage against the light and heavy profiles.
+
+    This is the payoff of measuring. Once we know a student's real request
+    volume, light and heavy stop being pricing *inputs* (guesses we bill them
+    for) and become pricing *labels* ("you are a light user"). Compared on a log
+    scale, because the profiles are 20x apart and the useful question is which
+    order of magnitude the student is in, not the arithmetic distance.
+
+    Returns (profile name, ratio of measured usage to that profile).
+    """
+    light = LIGHT["google_cloud_run_service"]["monthly_requests"]
+    heavy = HEAVY["google_cloud_run_service"]["monthly_requests"]
+    if monthly_requests <= 0:
+        return "light", 0.0
+    light_distance = abs(math.log(monthly_requests / light))
+    heavy_distance = abs(math.log(monthly_requests / heavy))
+    if heavy_distance < light_distance:
+        return "heavy", monthly_requests / heavy
+    return "light", monthly_requests / light

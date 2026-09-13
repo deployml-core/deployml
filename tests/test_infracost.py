@@ -19,11 +19,13 @@ from deployml.utils.infracost import (
     CostAnalysis,
     ResourceCost,
     _classify_category,
+    _report_scan_failure,
+    _resource_description,
     _row_to_resource_cost,
+    display_actual_costs,
     check_infracost_available,
     check_infracost_authenticated,
     display_estimate,
-    fetch_resource_costs,
     fetch_resource_costs_detailed,
     format_cost_for_confirmation,
     parse_infracost_scan_data,
@@ -165,17 +167,19 @@ def test_parse_infracost_scan_data_handles_zero_cost():
 
 
 # ---------------------------------------------------------------------------
-# fetch_resource_costs  (argv construction + row parsing)
+# _run_inspect_rows  (argv construction)
 # ---------------------------------------------------------------------------
 
-def test_fetch_resource_costs_passes_file_flag_to_inspect(tmp_path):
+def test_inspect_is_pinned_to_the_scan_file(tmp_path):
     # Guards against regressing to the global-cache form of `infracost inspect`:
-    # inspect must be pinned to the scan JSON we pass, via --file.
+    # inspect must be pinned to the scan JSON we pass, via --file. Without it,
+    # inspect reads infracost's "most recent scan" and can report a different
+    # workspace's costs.
     scan_json = tmp_path / "infracost-scan.json"
     scan_json.write_text("{}")
     with patch("deployml.utils.infracost.run_tool") as mock_run:
         mock_run.return_value = SimpleNamespace(returncode=0, stdout="[]", stderr="")
-        fetch_resource_costs(scan_json)
+        fetch_resource_costs_detailed(scan_json)
         tool, argv = mock_run.call_args[0][0], mock_run.call_args[0][1]
     # run_tool resolves the tool name to a real path, so the name is passed
     # separately from the args rather than as argv[0].
@@ -185,19 +189,14 @@ def test_fetch_resource_costs_passes_file_flag_to_inspect(tmp_path):
     assert argv[argv.index("--file") + 1] == str(scan_json)
 
 
-def test_fetch_resource_costs_accumulates_duplicate_resource_types(tmp_path):
-    # Two Cloud Run services should collapse into one row with summed cost.
-    rows = [
-        {"cost": "5.00", "columns": {"resource": "module.a.google_cloud_run_v2_service.x"}},
-        {"cost": "3.00", "columns": {"resource": "module.b.google_cloud_run_v2_service.y"}},
-        {"cost": "0", "columns": {"resource": "module.c.google_storage_bucket.z"}},
-    ]
+def test_inspect_failure_warns_instead_of_reporting_no_costs(capsys, tmp_path):
+    # A failed inspect used to render as "nothing costs money" underneath a
+    # non-zero headline total. It must say so instead.
     with patch("deployml.utils.infracost.run_tool") as mock_run:
-        mock_run.return_value = SimpleNamespace(
-            returncode=0, stdout=json.dumps(rows), stderr=""
-        )
-        result = fetch_resource_costs(tmp_path / "scan.json")
-    assert result == [("Cloud Run", 8.0)]  # zero-cost bucket dropped
+        mock_run.return_value = SimpleNamespace(returncode=1, stdout="", stderr="boom")
+        result = fetch_resource_costs_detailed(tmp_path / "scan.json")
+    assert result == []
+    assert "per-resource cost breakdown" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -307,3 +306,149 @@ def test_display_estimate_no_lever_when_balanced(capsys):
     display_estimate(resources, analysis, "light")
     out = capsys.readouterr().out
     assert "Biggest lever" not in out  # top fixed is 40% of total, below the 50% cutoff
+
+
+# ---------------------------------------------------------------------------
+# render_usage_yaml  (per-address measured usage)
+# ---------------------------------------------------------------------------
+
+def test_render_usage_yaml_pins_usage_to_terraform_addresses():
+    # Measured usage differs per service, so it must key on the address. A type
+    # default would charge every Cloud Run service the whole stack's traffic.
+    out = render_usage_yaml({}, {
+        "module.experiment_tracking_mlflow.google_cloud_run_service.mlflow": {
+            "monthly_requests": 30000.0,
+        },
+        "module.bigquery.google_bigquery_table.predictions[0]": {
+            "monthly_active_storage_gb": 1.5,
+        },
+    })
+    data = yaml.safe_load(out)
+    assert data["version"] == 0.1
+    # An empty profile emits no type defaults, so unmeasured usage stays at zero
+    # rather than falling back to a light/heavy guess.
+    assert "resource_type_default_usage" not in data
+    pinned = data["resource_usage"]
+    assert pinned[
+        "module.experiment_tracking_mlflow.google_cloud_run_service.mlflow"
+    ]["monthly_requests"] == 30000.0
+    # Addresses with a count index stay intact through quoting.
+    assert "module.bigquery.google_bigquery_table.predictions[0]" in pinned
+
+
+def test_render_usage_yaml_can_emit_both_sections():
+    out = render_usage_yaml(LIGHT, {"module.a.google_storage_bucket.b": {"storage_gb": 2}})
+    data = yaml.safe_load(out)
+    assert "resource_type_default_usage" in data and "resource_usage" in data
+
+
+# ---------------------------------------------------------------------------
+# _report_scan_failure  (expired-token handling)
+# ---------------------------------------------------------------------------
+
+def test_scan_failure_names_the_login_command_for_auth_errors(capsys):
+    # check_infracost_authenticated() can only see that a token file exists, so
+    # an expired token gets through the pre-flight check and fails here.
+    _report_scan_failure("Error: 401 Unauthorized: invalid API key")
+    out = capsys.readouterr().out
+    assert "infracost auth login" in out
+
+
+def test_scan_failure_passes_through_non_auth_errors(capsys):
+    _report_scan_failure("Error: could not parse main.tf at line 12")
+    out = capsys.readouterr().out
+    assert "could not parse main.tf" in out
+    assert "auth login" not in out
+
+
+# ---------------------------------------------------------------------------
+# _resource_description  (BigQuery queries vs storage)
+# ---------------------------------------------------------------------------
+
+def test_bigquery_dataset_and_tables_get_distinct_descriptions():
+    # Both live in the `bigquery` module, so a module-level description applied
+    # to both and labelled storage rows as query cost.
+    dataset = _resource_description(
+        "module.bigquery.google_bigquery_dataset.mlops", "google_bigquery_dataset"
+    )
+    table = _resource_description(
+        "module.bigquery.google_bigquery_table.predictions", "google_bigquery_table"
+    )
+    assert dataset != table
+    assert "quer" in dataset
+    assert "storage" in table
+
+
+def test_cloud_run_jobs_are_labelled():
+    # Emitted by the teardown / offline_scoring / explainability modules.
+    rc = _row_to_resource_cost(
+        {"cost": "0.02", "columns": {"resource": "module.teardown.google_cloud_run_v2_job.j"}}
+    )
+    assert rc.label == "Cloud Run Job"
+    assert rc.description == "scheduled batch job"
+
+
+# ---------------------------------------------------------------------------
+# display_actual_costs  (measured view)
+# ---------------------------------------------------------------------------
+
+def _measured(**kwargs):
+    from deployml.utils.measured_usage import MeasuredUsage
+    return MeasuredUsage(**kwargs)
+
+
+def test_display_actual_costs_shows_measurements_uptime_and_profile_label(capsys):
+    sql = "module.cloud_sql_postgres.google_sql_database_instance.pg"
+    run = "module.experiment_tracking_mlflow.google_cloud_run_service.mlflow"
+    resources = [
+        _rc(sql, "google_sql_database_instance", 34.55, "fixed", "Cloud SQL",
+            "MLflow's backend database"),
+        _rc(run, "google_cloud_run_service", 0.71, "usage", "Cloud Run",
+            "MLflow tracking server"),
+    ]
+    measured = _measured(
+        window_days=7.0,
+        resource_usage={run: {"monthly_requests": 30000.0}},
+        details={run: "30.0k req/mo, 240 ms median"},
+        sql_uptime={sql: 0.5},
+        notes=["BigQuery streaming inserts were not reported."],
+        cloud_run_monthly_requests=30000.0,
+    )
+    display_actual_costs(
+        resources, CostAnalysis(35.26, "USD", 71, 10, 61), measured,
+        "gcp-mlops-stack", "light", 0.6, deployed_days=7.0,
+    )
+    out = capsys.readouterr().out
+
+    assert "ACTUAL COST" in out and "gcp-mlops-stack" in out
+    assert "last 7 days" in out
+    assert "Run-rate" in out
+    # The measured numbers are shown next to the price they produced.
+    assert "30.0k req/mo, 240 ms median" in out
+    # Cloud SQL bills for existing, so uptime is reported rather than discounted.
+    assert "up 50% of window" in out
+    assert "$   34.55" in out
+    # light/heavy is now a label on real usage, not a pricing input.
+    assert "LIGHT user" in out
+    assert "Biggest lever" in out and "deployml destroy" in out
+    # A $0 is always explained.
+    assert "About these numbers" in out and "streaming inserts" in out
+    # ~$8.23 = 35.26 * 7/30
+    assert "Charged so far" in out
+
+
+def test_display_actual_costs_omits_profile_label_without_traffic(capsys):
+    sql = "module.cloud_sql_postgres.google_sql_database_instance.pg"
+    resources = [
+        _rc(sql, "google_sql_database_instance", 34.55, "fixed", "Cloud SQL", "db"),
+    ]
+    measured = _measured(window_days=30.0, notes=["Cloud Run served no requests."])
+    display_actual_costs(
+        resources, CostAnalysis(34.55, "USD", 71, 10, 61), measured,
+        "ws", "light", 0.0,
+    )
+    out = capsys.readouterr().out
+    # Calling someone a "light user" on zero data would be a guess.
+    assert "LIGHT user" not in out
+    assert "Charged so far" not in out  # no deploy timestamp available
+    assert "Cloud Run served no requests." in out
