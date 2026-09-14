@@ -7,9 +7,7 @@ Covers:
   4. format_cost_for_confirmation — pure function
 """
 
-import json
 import os
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -452,3 +450,14 @@ def test_display_actual_costs_omits_profile_label_without_traffic(capsys):
     assert "LIGHT user" not in out
     assert "Charged so far" not in out  # no deploy timestamp available
     assert "Cloud Run served no requests." in out
+
+
+def test_render_usage_yaml_escapes_for_each_addresses():
+    # A for_each address embeds its own quotes, e.g.
+    #   google_project_service.required["cloudkms.googleapis.com"]
+    # Naive f-string quoting closes the YAML string early and the whole usage file
+    # becomes unparseable, which infracost would reject or misread.
+    addr = 'module.x.google_storage_bucket.buckets["prod"]'
+    out = render_usage_yaml({}, {addr: {"storage_gb": 5}})
+    data = yaml.safe_load(out)  # must not raise
+    assert data["resource_usage"][addr]["storage_gb"] == 5

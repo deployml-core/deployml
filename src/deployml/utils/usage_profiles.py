@@ -11,6 +11,7 @@ Field names below are the exact keys infracost expects for each resource type
 (see infracost's usage-file schema). To tune assumptions, edit the numbers here.
 """
 
+import json
 import math
 from typing import Dict, Optional, Tuple
 
@@ -102,8 +103,13 @@ def render_usage_yaml(
     if resource_usage:
         lines.append("resource_usage:")
         for address, fields in resource_usage.items():
-            # Addresses contain dots and brackets, so they need quoting.
-            lines.append(f'  "{address}":')
+            # Addresses contain dots and brackets, so they need quoting -- and a
+            # for_each address embeds its own quotes, e.g.
+            #   google_project_service.required["cloudkms.googleapis.com"]
+            # which would close the string early and produce invalid YAML.
+            # json.dumps emits a correctly escaped double-quoted scalar, which is
+            # also valid YAML double-quoted style.
+            lines.append(f"  {json.dumps(address)}:")
             for key, value in fields.items():
                 lines.append(f"    {key}: {value}")
 

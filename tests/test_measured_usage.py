@@ -326,3 +326,102 @@ def test_classify_usage_profile_picks_the_nearer_profile_on_a_log_scale():
     assert classify_usage_profile(200_000)[0] == "light"
     assert classify_usage_profile(300_000)[0] == "heavy"
     assert classify_usage_profile(0) == ("light", 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Address contract with infracost
+# ---------------------------------------------------------------------------
+
+# The exact addresses infracost reported for the deployml Cloud Run stack, taken
+# from a real `infracost scan` of the rendered workspace (it keys each resource by
+# its terraform address in the "name" field). Measured usage is pinned to these
+# strings via the usage file's `resource_usage` block, so if terraform's address
+# and infracost's address ever stop agreeing, the usage file is silently ignored
+# and every usage line prices at $0 -- the exact bug measured usage exists to fix.
+#
+# Note the count indices: `module.experiment_tracking_mlflow[0]` and `mlflow[0]`
+# are part of the key. Stripping or normalising them breaks the binding.
+_INFRACOST_ADDRESSES = {
+    "google_storage_bucket.artifact_tracking_mlflow_artifact",
+    "module.bigquery.google_bigquery_dataset.mlops",
+    "module.bigquery.google_bigquery_table.drift_metrics",
+    "module.bigquery.google_bigquery_table.ground_truth",
+    "module.bigquery.google_bigquery_table.offline_features",
+    "module.bigquery.google_bigquery_table.predictions",
+    "module.cloud_sql_postgres.google_sql_database_instance.postgres",
+    "module.experiment_tracking_mlflow[0].google_cloud_run_service.mlflow[0]",
+    "module.model_monitoring_grafana[0].google_cloud_run_service.grafana",
+    "module.model_serving_fastapi[0].google_cloud_run_service.fastapi",
+}
+
+# Shaped like `terraform show -json` output for that same stack: addresses exactly
+# as terraform emits them, plus a data source and a free resource that must drop.
+_REAL_SHAPE = {
+    "values": {
+        "root_module": {
+            "resources": [
+                {"address": "google_storage_bucket.artifact_tracking_mlflow_artifact",
+                 "mode": "managed", "type": "google_storage_bucket",
+                 "values": {"name": "mlflow-artifacts-deployml-test-dev"}},
+            ],
+            "child_modules": [
+                {"address": "module.bigquery", "resources": [
+                    {"address": "module.bigquery.google_bigquery_dataset.mlops",
+                     "mode": "managed", "type": "google_bigquery_dataset",
+                     "values": {"dataset_id": "mlops"}},
+                ] + [
+                    {"address": f"module.bigquery.google_bigquery_table.{t}",
+                     "mode": "managed", "type": "google_bigquery_table",
+                     "values": {"table_id": t}}
+                    for t in ("drift_metrics", "ground_truth", "offline_features", "predictions")
+                ]},
+                {"address": "module.cloud_sql_postgres", "resources": [
+                    {"address": "module.cloud_sql_postgres.google_sql_database_instance.postgres",
+                     "mode": "managed", "type": "google_sql_database_instance",
+                     "values": {"name": "mlflow-postgres-deployml-test-dev"}},
+                    # Free resource: enabling an API costs nothing and infracost
+                    # marks it is_free, but it still has a name so it lands in the map.
+                    {"address": 'module.cloud_sql_postgres.google_project_service.required["cloudkms.googleapis.com"]',
+                     "mode": "managed", "type": "google_project_service",
+                     "values": {"service": "cloudkms.googleapis.com"}},
+                ]},
+                {"address": "module.experiment_tracking_mlflow[0]", "resources": [
+                    {"address": "module.experiment_tracking_mlflow[0].google_cloud_run_service.mlflow[0]",
+                     "mode": "managed", "type": "google_cloud_run_service",
+                     "values": {"name": "mlflow-server"}},
+                    # Data source, not a billable resource.
+                    {"address": "module.experiment_tracking_mlflow[0].data.google_project.current",
+                     "mode": "data", "type": "google_project",
+                     "values": {"name": "deployml-TEST-DEV"}},
+                ]},
+                {"address": "module.model_monitoring_grafana[0]", "resources": [
+                    {"address": "module.model_monitoring_grafana[0].google_cloud_run_service.grafana",
+                     "mode": "managed", "type": "google_cloud_run_service",
+                     "values": {"name": "grafana-server"}},
+                ]},
+                {"address": "module.model_serving_fastapi[0]", "resources": [
+                    {"address": "module.model_serving_fastapi[0].google_cloud_run_service.fastapi",
+                     "mode": "managed", "type": "google_cloud_run_service",
+                     "values": {"name": "fastapi-mlflow-server"}},
+                ]},
+            ],
+        }
+    }
+}
+
+
+def test_addresses_match_what_infracost_keys_usage_on(tmp_path):
+    with patch("deployml.utils.measured_usage.run_tool") as mock_run:
+        mock_run.return_value = SimpleNamespace(
+            returncode=0, stdout=json.dumps(_REAL_SHAPE), stderr=""
+        )
+        addresses = {r.address for r in build_resource_map(tmp_path)}
+
+    # Terraform's addresses are passed through verbatim, count indices included.
+    assert _INFRACOST_ADDRESSES <= addresses, (
+        "addresses infracost expects are missing: "
+        f"{sorted(_INFRACOST_ADDRESSES - addresses)}"
+    )
+    # The data source dropped; the free API-enablement resource is allowed through
+    # because infracost prices it at $0 anyway and it never matches a metric label.
+    assert not any(".data." in a for a in addresses)
