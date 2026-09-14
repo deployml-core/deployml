@@ -59,6 +59,49 @@ Builds run on Cloud Build, so a local Docker daemon is not required for GCP mode
 
 ---
 
+## `deployml estimate`
+
+Predict monthly cost from your config, without deploying or touching any cloud
+resources. Reads the Terraform deployml would generate and prices it.
+
+```bash
+deployml estimate
+deployml estimate --profile heavy
+```
+
+**Options:**
+- `--config-path`, `-c`: Path to config YAML. Default `config.yaml`.
+- `--profile`, `-p`: Usage assumption, `light` (default) or `heavy`. Light is a
+  typical student working through the coursework; heavy is a busy course project,
+  roughly 10-20x the traffic.
+
+Infracost prices usage-based services at zero usage by default, which would report
+Cloud Run, BigQuery, and GCS at $0 and make the estimate look far cheaper than
+reality. The profile supplies a realistic usage assumption instead, and the output
+separates the two kinds of cost:
+
+```
+  ~$35 / month   ($34.55 fixed  +  ~$0.92 usage)  USD
+
+  ALWAYS-ON  (billed 24/7 even if you never use the stack)
+    $   34.55  Cloud SQL    MLflow's backend database
+
+  USAGE-BASED  (scales with activity · profile: light)
+    $    0.44  BigQuery     prediction & feature queries
+    $    0.24  GCS Bucket   MLflow model artifacts
+    $    0.24  Cloud Run    MLflow tracking server
+
+  Biggest lever: Cloud SQL is 97% of your cost and runs 24/7.
+```
+
+Changing the profile moves only the usage line; the always-on baseline does not
+move, which is the point. Not supported for GKE deployments.
+
+Requires infracost installed and authenticated (`infracost auth login`), but no
+cloud credentials.
+
+---
+
 ## `deployml deploy`
 
 Deploy infrastructure from a YAML config file. Prompts for confirmation by default.
@@ -77,6 +120,58 @@ deployml deploy --verbose --yes
 Before any cloud work, deploy validates the config shape and, for GCP, preflights both gcloud auth and Application Default Credentials. A missing ADC fails fast with `gcloud auth application-default login` guidance instead of an opaque "default credentials not found" at apply. A malformed `stack` entry also fails here with a clear message rather than crashing mid-deploy.
 
 First-time deploy takes about 20 minutes because Cloud SQL Postgres provisioning is slow.
+
+---
+
+## `deployml costs`
+
+Show what a running deployment actually costs, measured from real GCP usage
+rather than assumed.
+
+```bash
+deployml costs
+deployml costs --days 7
+```
+
+**Options:**
+- `--config-path`, `-c`: Path to config YAML. Default `config.yaml`.
+- `--days`, `-d`: How many days of real usage to measure, 1-90. Default 30. If the
+  deployment is younger than the window, the window shrinks to the deployment's age
+  so the run-rate is not diluted by days that never happened.
+
+Where `estimate` has to assume your usage, this reads it: requests served per Cloud
+Run service, bytes stored in GCS, bytes scanned by BigQuery, and how much of the
+window the database was up. Those measurements are pulled from Cloud Monitoring and
+priced through infracost, so each line shows the number that produced it:
+
+```
+  ACTUAL COST  ·  gcp-mlops-stack
+  Measured from your real GCP usage over the last 7 days.
+
+  Run-rate: ~$36 / month   ($34.55 always-on  +  ~$1.42 measured usage)  USD
+  Charged so far: ~$8.40   (7.0 days since deploy, approximate)
+
+  ALWAYS-ON  (billed 24/7 while the stack exists)
+    $   34.55  Cloud SQL    MLflow's backend database  ·  up 100% of window
+
+  USAGE-BASED  (measured over 7 days, scaled to a month)
+    $    0.71  Cloud Run    MLflow tracking server  ·  30.0k req/mo, 240 ms median
+    $    0.44  BigQuery     prediction & feature queries  ·  0.041 TB/mo scanned
+
+  You are a LIGHT user — your real usage is 0.6x the 'light' profile.
+```
+
+Anything Cloud Monitoring cannot report is priced at $0 and listed under
+"About these numbers", along with the places a measurement is an approximation,
+so a zero is always explained rather than silently assumed.
+
+This is not a billing statement. It prices your measured usage at list rates;
+for the amount you were actually charged, see the GCP Billing Console.
+
+**Requires:**
+- infracost installed and authenticated
+- Application Default Credentials: `gcloud auth application-default login`
+- `roles/monitoring.viewer` on the project (checked by `deployml doctor --project-id`)
 
 ---
 

@@ -6,6 +6,13 @@ This tutorial walks you through deploying a full MLOps stack on GCP using Cloud 
 
 Run `deployml doctor --project-id YOUR_GCP_PROJECT_ID` first. It checks everything in the [installation guide](../installation.md). Make sure the IAM and API checks pass before you continue.
 
+Infracost is optional. Install it only if you want the cost estimate steps below:
+
+```bash
+brew install infracost
+infracost auth login
+```
+
 ## 1. Create and prepare your GCP project
 
 1. Create a project in the [GCP Console](https://console.cloud.google.com). Note the project ID.
@@ -62,6 +69,16 @@ stack:
 - `experiment_tracking` + `artifact_tracking` + `model_registry` together deploy a single MLflow server backed by Cloud SQL Postgres for metadata and a GCS bucket for artifacts.
 - `model_serving` deploys a FastAPI container that pulls the latest registered model from MLflow on startup.
 - `model_monitoring` deploys Grafana connected to the Postgres `metrics` database.
+
+## 3.5 Estimate costs (optional)
+
+Check what the stack will cost before committing to a 20-minute deploy:
+
+```bash
+deployml estimate
+```
+
+No GCP credentials required, no infrastructure touched. A standard Cloud Run stack runs around **$34/month** — almost entirely Cloud SQL. See [Cost Estimates](../features/costs.md).
 
 ## 4. Build Docker images
 
@@ -158,6 +175,14 @@ You should see `offline_features`, `predictions`, `ground_truth`, and `drift_met
 ## 9. Run the end to end example
 
 With the stack running, follow the [example walkthrough](example.md) to train a model, register it, serve predictions through FastAPI, and visualize drift metrics in Grafana.
+
+## 9.5 Check running costs
+
+```bash
+deployml costs
+```
+
+Shows what your deployed stack is currently costing. Cloud SQL is the main driver at ~$34/month — everything else scales to zero.
 
 ## 10. Teardown
 
