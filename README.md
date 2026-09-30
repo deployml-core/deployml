@@ -72,6 +72,11 @@ python example/scripts/07_setup_grafana.py         # provision monitoring dashbo
 
 See [example/README.md](example/README.md) for details.
 
+**Delayed ground truth tutorial (POC):** a variant that trains on only a
+cutoff of the data, then streams the rest in as batches with ground truth
+arriving after a delay, so you can watch drift/MAE metrics evolve instead of
+landing all at once. See [example/tutorial_streaming/README.md](example/tutorial_streaming/README.md).
+
 ## Teardown
 
 ```bash
